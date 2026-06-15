@@ -1,14 +1,27 @@
-pub fn add(left: u64, right: u64) -> u64 {
-    left + right
+use poker_core::{Action, PlayerId, PokerGameView, RuleError};
+use serde::{Deserialize, Serialize};
+
+#[derive(Serialize, Deserialize)]
+pub enum ServerMessage {
+    // All messages from server to client.
+    TableJoinSuccess(PlayerId),
+    TableJoinFailed,
+    StateUpdate(PokerGameView),
+    ItsYourTurn,
+    ActionRejected(RuleError),
 }
 
-#[cfg(test)]
-mod tests {
-    use super::*;
+#[derive(Serialize, Deserialize)]
+pub enum ClientMessage {
+    // All messages from client to server.
+    JoinTableRequest,
+    Action(Action)
+}
 
-    #[test]
-    fn it_works() {
-        let result = add(2, 2);
-        assert_eq!(result, 4);
-    }
+pub fn encode<T: Serialize>(message: &T) -> String {
+    serde_json::to_string(message).unwrap()
+}
+
+pub fn decode<'a, T: Deserialize<'a>>(message: &'a str) -> T {
+    serde_json::from_str(message).unwrap()
 }
