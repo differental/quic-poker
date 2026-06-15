@@ -1,3 +1,26 @@
+use std::sync::Arc;
+
+use quinn::{ServerConfig, crypto::rustls::QuicServerConfig};
+use rustls::pki_types::{CertificateDer, PrivateKeyDer, PrivatePkcs8KeyDer};
+
+use crate::error::NetError;
+
+pub fn configure_server(
+    cert: CertificateDer<'static>,
+    key: PrivatePkcs8KeyDer<'static>,
+) -> Result<ServerConfig, NetError> {
+    let crypto = rustls::ServerConfig::builder_with_provider(Arc::new(
+        rustls::crypto::ring::default_provider(),
+    ))
+    .with_safe_default_protocol_versions()?
+    .with_no_client_auth()
+    .with_single_cert(vec![cert], PrivateKeyDer::from(key))?;
+
+    Ok(ServerConfig::with_crypto(Arc::new(
+        QuicServerConfig::try_from(crypto)?,
+    )))
+}
+
 #[cfg(feature = "dev")]
 pub mod dev {
     // Use self-signed certificates (INSECURE!!) for dev purposes
@@ -10,6 +33,8 @@ pub mod dev {
         crypto::{CryptoProvider, verify_tls12_signature, verify_tls13_signature},
         pki_types::{CertificateDer, PrivatePkcs8KeyDer, ServerName, UnixTime},
     };
+
+    use crate::error::NetError;
 
     #[derive(Debug)]
     struct SkipServerVerification(Arc<CryptoProvider>);
@@ -65,14 +90,14 @@ pub mod dev {
     }
 
     pub fn generate_self_signed_cert()
-    -> Result<(CertificateDer<'static>, PrivatePkcs8KeyDer<'static>), Box<dyn Error>> {
+    -> Result<(CertificateDer<'static>, PrivatePkcs8KeyDer<'static>), NetError> {
         let cert = rcgen::generate_simple_self_signed(vec!["localhost".to_string()])?;
         let cert_der = CertificateDer::from(cert.cert);
         let key = PrivatePkcs8KeyDer::from(cert.signing_key.serialize_der());
         Ok((cert_der, key))
     }
 
-    pub fn configure_client() -> Result<ClientConfig, Box<dyn Error>> {
+    pub fn configure_client() -> Result<ClientConfig, NetError> {
         let crypto = rustls::ClientConfig::builder_with_provider(Arc::new(
             rustls::crypto::ring::default_provider(),
         ))
@@ -89,11 +114,13 @@ pub mod dev {
 
 #[cfg(not(feature = "dev"))]
 pub mod prod {
-    use std::{error::Error, sync::Arc};
+    use std::sync::Arc;
 
     use quinn::{ClientConfig, crypto::rustls::QuicClientConfig};
 
-    pub fn configure_client() -> Result<ClientConfig, Box<dyn Error>> {
+    use crate::error::NetError;
+
+    pub fn configure_client() -> Result<ClientConfig, NetError> {
         // Use the Mozilla CA root certificate store
         let roots = rustls::RootCertStore {
             roots: webpki_roots::TLS_SERVER_ROOTS.to_vec(),
