@@ -1,8 +1,8 @@
 use itertools::Itertools;
 use rand::seq::SliceRandom;
-use std::{cmp::max, fmt, iter::zip};
+use std::{cmp::max, fmt};
 
-#[derive(Clone, Copy, PartialEq, Eq)]
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
 enum Suit {
     Spades,
     Hearts,
@@ -21,7 +21,7 @@ impl fmt::Display for Suit {
     }
 }
 
-#[derive(PartialEq, PartialOrd, Eq, Ord, Clone, Copy)]
+#[derive(PartialEq, PartialOrd, Eq, Ord, Clone, Copy, Debug)]
 enum Rank {
     Two,
     Three,
@@ -78,7 +78,7 @@ impl From<Rank> for u8 {
     }
 }
 
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, Debug)]
 struct Card {
     suit: Suit,
     rank: Rank,
@@ -327,18 +327,18 @@ const FULL_DECK: [Card; 52] = [
     },
 ];
 
-#[derive(PartialEq, Eq, PartialOrd, Ord)]
+#[derive(PartialEq, Eq, PartialOrd, Ord, Debug)]
 enum PokerHand {
-    RoyalFlush,
-    StraightFlush(Rank),   // Only highest card rank
-    Quads(Rank, Rank),     // (quad_rank, fifth_card)
-    FullHouse(Rank, Rank), // (trip_rank, pair_rank)
-    Flush(Rank, Rank, Rank, Rank, Rank),
-    Straight(Rank),                  // Only highest card rank for straight
-    Trips(Rank, Rank, Rank),         // (trips, fourth_card, fifth_card)
-    TwoPair(Rank, Rank, Rank),       // (large_pair, small_pair, other_card)
-    OnePair(Rank, Rank, Rank, Rank), // (pair, ...)
     HighCard(Rank, Rank, Rank, Rank, Rank),
+    OnePair(Rank, Rank, Rank, Rank), // (pair, ...)
+    TwoPair(Rank, Rank, Rank),       // (large_pair, small_pair, other_card)
+    Trips(Rank, Rank, Rank),         // (trips, fourth_card, fifth_card)
+    Straight(Rank),                  // Only highest card rank for straight
+    Flush(Rank, Rank, Rank, Rank, Rank),
+    FullHouse(Rank, Rank), // (trip_rank, pair_rank)
+    Quads(Rank, Rank),     // (quad_rank, fifth_card)
+    StraightFlush(Rank),   // Only highest card rank
+    RoyalFlush,
 }
 
 fn evaluate_holdem_hand(cards: &[Card]) -> PokerHand {
@@ -592,7 +592,7 @@ impl PokerGame {
                 self.last_raise_player_idx = 1;
 
                 // Find first player starting from small blind (1) that can action
-                for idx in (1..=100).chain(std::iter::once(0)) {
+                for idx in (1..self.player_data.len()).chain(std::iter::once(0)) {
                     let player = &self.player_data[idx];
                     if !player.folded && !player.allin {
                         // Found next player
@@ -610,7 +610,7 @@ impl PokerGame {
                 self.last_raise_player_idx = 1;
 
                 // Find first player starting from small blind (1) that can action
-                for idx in (1..=100).chain(std::iter::once(0)) {
+                for idx in (1..self.player_data.len()).chain(std::iter::once(0)) {
                     let player = &self.player_data[idx];
                     if !player.folded && !player.allin {
                         // Found next player
@@ -628,7 +628,7 @@ impl PokerGame {
                 self.last_raise_player_idx = 1;
 
                 // Find first player starting from small blind (1) that can action
-                for idx in (1..=100).chain(std::iter::once(0)) {
+                for idx in (1..self.player_data.len()).chain(std::iter::once(0)) {
                     let player = &self.player_data[idx];
                     if !player.folded && !player.allin {
                         // Found next player
@@ -681,6 +681,12 @@ impl PokerGame {
                 if new_bet <= self.current_bet {
                     return Err(RuleError::IllegalAction);
                 }
+                
+                // Illegal to raise more than table max
+                if new_bet > self.table_max_bet {
+                    return Err(RuleError::IllegalAction);
+                }
+
                 // Raise: Set user bet as well as table current bet
                 self.current_bet = new_bet;
                 curr_player.bet = new_bet;
@@ -757,5 +763,294 @@ impl PokerGame {
         }
 
         returned_states
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn card(rank: Rank, suit: Suit) -> Card {
+        Card { rank, suit }
+    }
+
+    /// Builds a fresh pre-flop game with `n` seats, no shuffling, so individual
+    /// fields can be controlled. Mirrors what `PokerGame::new` would produce for
+    /// the parts the betting/round logic cares about.
+    fn game_with_players(n: usize) -> PokerGame {
+        let player_data = (0..n)
+            .map(|i| PlayerData {
+                id: PlayerId(i as u32),
+                hole_cards: vec![],
+                bet: 0,
+                folded: false,
+                allin: false,
+            })
+            .collect();
+        PokerGame {
+            current_round: PokerRound::PreFlop,
+            current_bet: 100,
+            community_cards: vec![],
+            player_data,
+            table_max_bet: 10_000,
+            player_to_action_idx: 0,
+            last_raise_player_idx: 0,
+        }
+    }
+
+    // Hand categories rank from RoyalFlush (best) down to HighCard (worst).
+    #[test]
+    fn hand_categories_rank_in_order() {
+        assert!(
+            PokerHand::RoyalFlush
+                > PokerHand::StraightFlush(Rank::King)
+                && PokerHand::StraightFlush(Rank::King) > PokerHand::Quads(Rank::Ace, Rank::King)
+                && PokerHand::Quads(Rank::Ace, Rank::King)
+                    > PokerHand::FullHouse(Rank::Ace, Rank::King)
+                && PokerHand::FullHouse(Rank::Ace, Rank::King)
+                    > PokerHand::Flush(Rank::Ace, Rank::King, Rank::Queen, Rank::Jack, Rank::Nine)
+                && PokerHand::Flush(Rank::Ace, Rank::King, Rank::Queen, Rank::Jack, Rank::Nine)
+                    > PokerHand::Straight(Rank::Ace)
+                && PokerHand::Straight(Rank::Ace) > PokerHand::Trips(Rank::Ace, Rank::King, Rank::Queen)
+                && PokerHand::Trips(Rank::Ace, Rank::King, Rank::Queen)
+                    > PokerHand::TwoPair(Rank::Ace, Rank::King, Rank::Queen)
+                && PokerHand::TwoPair(Rank::Ace, Rank::King, Rank::Queen)
+                    > PokerHand::OnePair(Rank::Ace, Rank::King, Rank::Queen, Rank::Jack)
+                && PokerHand::OnePair(Rank::Ace, Rank::King, Rank::Queen, Rank::Jack)
+                    > PokerHand::HighCard(Rank::Ace, Rank::King, Rank::Queen, Rank::Jack, Rank::Nine)
+        );
+    }
+
+    // A higher straight flush beats a lower one within the same category.
+    #[test]
+    fn higher_straight_flush_wins() {
+        assert!(PokerHand::StraightFlush(Rank::King) > PokerHand::StraightFlush(Rank::Six));
+    }
+
+    // T-J-Q-K-A suited evaluates to a royal flush.
+    #[test]
+    fn evaluate_detects_royal_flush() {
+        let cards = [
+            card(Rank::Ten, Suit::Hearts),
+            card(Rank::Jack, Suit::Hearts),
+            card(Rank::Queen, Suit::Hearts),
+            card(Rank::King, Suit::Hearts),
+            card(Rank::Ace, Suit::Hearts),
+            card(Rank::Two, Suit::Clubs),
+            card(Rank::Seven, Suit::Diamonds),
+        ];
+        assert_eq!(evaluate_holdem_hand(&cards), PokerHand::RoyalFlush);
+    }
+
+    // Five consecutive suited cards evaluate to a straight flush.
+    #[test]
+    fn evaluate_detects_straight_flush() {
+        let cards = [
+            card(Rank::Five, Suit::Spades),
+            card(Rank::Six, Suit::Spades),
+            card(Rank::Seven, Suit::Spades),
+            card(Rank::Eight, Suit::Spades),
+            card(Rank::Nine, Suit::Spades),
+        ];
+        assert!(matches!(evaluate_holdem_hand(&cards), PokerHand::StraightFlush(..)));
+    }
+
+    // Four of a kind evaluates to quads.
+    #[test]
+    fn evaluate_detects_quads() {
+        let cards = [
+            card(Rank::Nine, Suit::Spades),
+            card(Rank::Nine, Suit::Hearts),
+            card(Rank::Nine, Suit::Diamonds),
+            card(Rank::Nine, Suit::Clubs),
+            card(Rank::King, Suit::Spades),
+        ];
+        assert!(matches!(evaluate_holdem_hand(&cards), PokerHand::Quads(..)));
+    }
+
+    // Trips plus a pair evaluates to a full house.
+    #[test]
+    fn evaluate_detects_full_house() {
+        let cards = [
+            card(Rank::Nine, Suit::Spades),
+            card(Rank::Nine, Suit::Hearts),
+            card(Rank::Nine, Suit::Diamonds),
+            card(Rank::King, Suit::Clubs),
+            card(Rank::King, Suit::Spades),
+        ];
+        assert!(matches!(evaluate_holdem_hand(&cards), PokerHand::FullHouse(..)));
+    }
+
+    // Five cards of one suit evaluate to a flush.
+    #[test]
+    fn evaluate_detects_flush() {
+        let cards = [
+            card(Rank::Ace, Suit::Spades),
+            card(Rank::Jack, Suit::Spades),
+            card(Rank::Nine, Suit::Spades),
+            card(Rank::Six, Suit::Spades),
+            card(Rank::Three, Suit::Spades),
+        ];
+        assert!(matches!(evaluate_holdem_hand(&cards), PokerHand::Flush(..)));
+    }
+
+    // Five consecutive off-suit cards evaluate to a straight.
+    #[test]
+    fn evaluate_detects_straight() {
+        let cards = [
+            card(Rank::Five, Suit::Spades),
+            card(Rank::Six, Suit::Hearts),
+            card(Rank::Seven, Suit::Diamonds),
+            card(Rank::Eight, Suit::Clubs),
+            card(Rank::Nine, Suit::Spades),
+        ];
+        assert!(matches!(evaluate_holdem_hand(&cards), PokerHand::Straight(..)));
+    }
+
+    // The A-2-3-4-5 wheel counts as a straight (high card Five).
+    #[test]
+    fn evaluate_detects_wheel_straight() {
+        let cards = [
+            card(Rank::Ace, Suit::Spades),
+            card(Rank::Two, Suit::Hearts),
+            card(Rank::Three, Suit::Diamonds),
+            card(Rank::Four, Suit::Clubs),
+            card(Rank::Five, Suit::Spades),
+        ];
+        assert_eq!(evaluate_holdem_hand(&cards), PokerHand::Straight(Rank::Five));
+    }
+
+    // Three of a kind evaluates to trips.
+    #[test]
+    fn evaluate_detects_trips() {
+        let cards = [
+            card(Rank::Nine, Suit::Spades),
+            card(Rank::Nine, Suit::Hearts),
+            card(Rank::Nine, Suit::Diamonds),
+            card(Rank::King, Suit::Clubs),
+            card(Rank::Two, Suit::Spades),
+        ];
+        assert!(matches!(evaluate_holdem_hand(&cards), PokerHand::Trips(..)));
+    }
+
+    // Two pairs evaluate to two pair.
+    #[test]
+    fn evaluate_detects_two_pair() {
+        let cards = [
+            card(Rank::Nine, Suit::Spades),
+            card(Rank::Nine, Suit::Hearts),
+            card(Rank::Five, Suit::Diamonds),
+            card(Rank::Five, Suit::Clubs),
+            card(Rank::King, Suit::Spades),
+        ];
+        assert!(matches!(evaluate_holdem_hand(&cards), PokerHand::TwoPair(..)));
+    }
+
+    // A single pair evaluates to one pair.
+    #[test]
+    fn evaluate_detects_one_pair() {
+        let cards = [
+            card(Rank::Nine, Suit::Spades),
+            card(Rank::Nine, Suit::Hearts),
+            card(Rank::King, Suit::Diamonds),
+            card(Rank::Seven, Suit::Clubs),
+            card(Rank::Two, Suit::Spades),
+        ];
+        assert!(matches!(evaluate_holdem_hand(&cards), PokerHand::OnePair(..)));
+    }
+
+    // Five unconnected off-suit cards evaluate to high card.
+    #[test]
+    fn evaluate_detects_high_card() {
+        let cards = [
+            card(Rank::Ace, Suit::Spades),
+            card(Rank::King, Suit::Hearts),
+            card(Rank::Queen, Suit::Diamonds),
+            card(Rank::Jack, Suit::Clubs),
+            card(Rank::Nine, Suit::Spades),
+        ];
+        assert_eq!(
+            evaluate_holdem_hand(&cards),
+            PokerHand::HighCard(Rank::Ace, Rank::King, Rank::Queen, Rank::Jack, Rank::Nine)
+        );
+    }
+
+    // From seven cards the best five-card hand is chosen (flush over a pair).
+    #[test]
+    fn evaluate_picks_best_of_seven() {
+        let cards = [
+            card(Rank::Ace, Suit::Spades),
+            card(Rank::King, Suit::Spades),
+            card(Rank::Queen, Suit::Spades),
+            card(Rank::Jack, Suit::Spades),
+            card(Rank::Nine, Suit::Spades),
+            card(Rank::Two, Suit::Hearts),
+            card(Rank::Two, Suit::Diamonds),
+        ];
+        assert!(matches!(evaluate_holdem_hand(&cards), PokerHand::Flush(..)));
+    }
+
+    // PreFlop: action falls through to the button when both blinds are out.
+    #[test]
+    fn advance_preflop_finds_button_when_blinds_cannot_act() {
+        let mut game = game_with_players(3);
+        game.player_data[1].folded = true;
+        game.player_data[2].allin = true;
+        game.advance_round();
+        assert_eq!(game.player_to_action_idx, 0);
+    }
+
+    // Flop: action falls through to the button when both blinds are out.
+    #[test]
+    fn advance_flop_finds_button_when_blinds_cannot_act() {
+        let mut game = game_with_players(3);
+        game.current_round = PokerRound::Flop;
+        game.player_data[1].folded = true;
+        game.player_data[2].allin = true;
+        game.advance_round();
+        assert_eq!(game.player_to_action_idx, 0);
+    }
+
+    // Turn: action falls through to the button when both blinds are out.
+    #[test]
+    fn advance_turn_finds_button_when_blinds_cannot_act() {
+        let mut game = game_with_players(3);
+        game.current_round = PokerRound::Turn;
+        game.player_data[1].folded = true;
+        game.player_data[2].allin = true;
+        game.advance_round();
+        assert_eq!(game.player_to_action_idx, 0);
+    }
+
+    // Bets are cumulative across streets by design and are not reset on advance.
+    #[test]
+    fn cumulative_bets_persist_across_rounds() {
+        let mut game = game_with_players(3);
+        game.current_bet = 100;
+        for p in &mut game.player_data {
+            p.bet = 100;
+        }
+        game.advance_round();
+        assert_eq!(game.current_bet, 100);
+        assert_eq!(game.player_data[1].bet, 100);
+    }
+
+    // A raise above table_max_bet is rejected and leaves state untouched.
+    #[test]
+    fn raise_above_table_max_is_rejected() {
+        let mut game = game_with_players(3);
+        game.table_max_bet = 1_000;
+        game.current_bet = 100;
+        let res = game.action(PlayerId(0), Action::Raise { to: 5_000 });
+        assert!(res.is_err());
+        assert_eq!(game.current_bet, 100);
+        assert_eq!(game.player_data[0].bet, 0);
+    }
+
+    // Cards compare by rank only; suit is intentionally ignored.
+    #[test]
+    fn cards_compare_by_rank_only() {
+        assert_eq!(card(Rank::Ace, Suit::Spades), card(Rank::Ace, Suit::Hearts));
+        assert!(card(Rank::Ace, Suit::Spades) > card(Rank::King, Suit::Spades));
     }
 }
