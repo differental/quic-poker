@@ -1,8 +1,9 @@
 use itertools::Itertools;
 use rand::seq::SliceRandom;
+use serde::{Deserialize, Serialize};
 use std::{cmp::max, fmt};
 
-#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+#[derive(Clone, Copy, PartialEq, Eq, Debug, Serialize, Deserialize)]
 enum Suit {
     Spades,
     Hearts,
@@ -21,7 +22,7 @@ impl fmt::Display for Suit {
     }
 }
 
-#[derive(PartialEq, PartialOrd, Eq, Ord, Clone, Copy, Debug)]
+#[derive(PartialEq, PartialOrd, Eq, Ord, Clone, Copy, Debug, Serialize, Deserialize)]
 enum Rank {
     Two,
     Three,
@@ -78,7 +79,7 @@ impl From<Rank> for u8 {
     }
 }
 
-#[derive(Clone, Copy, Debug)]
+#[derive(Clone, Copy, Debug, Serialize, Deserialize)]
 struct Card {
     suit: Suit,
     rank: Rank,
@@ -327,7 +328,7 @@ const FULL_DECK: [Card; 52] = [
     },
 ];
 
-#[derive(PartialEq, Eq, PartialOrd, Ord, Debug)]
+#[derive(PartialEq, Eq, PartialOrd, Ord, Debug, Serialize, Deserialize)]
 enum PokerHand {
     HighCard(Rank, Rank, Rank, Rank, Rank),
     OnePair(Rank, Rank, Rank, Rank), // (pair, ...)
@@ -487,9 +488,10 @@ fn evaluate_holdem_hand(cards: &[Card]) -> PokerHand {
     best_hand
 }
 
-#[derive(PartialEq, Eq, Clone, Copy)]
+#[derive(PartialEq, Eq, Clone, Copy, Serialize, Deserialize)]
 pub struct PlayerId(pub u32);
 
+#[derive(Clone, Copy, Serialize, Deserialize)]
 pub enum Action {
     Fold,
     Check,
@@ -497,7 +499,7 @@ pub enum Action {
     Raise { to: u64 },
 }
 
-#[derive(Clone)]
+#[derive(Clone, Serialize, Deserialize)]
 struct PlayerData {
     id: PlayerId,
     hole_cards: Vec<Card>,
@@ -506,7 +508,7 @@ struct PlayerData {
     allin: bool,
 }
 
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, Serialize, Deserialize)]
 enum PokerRound {
     PreFlop,
     Flop,
@@ -515,7 +517,6 @@ enum PokerRound {
     Showdown,
 }
 
-#[derive(Clone)]
 struct PokerGame {
     current_round: PokerRound,
     current_bet: u64,
@@ -526,6 +527,25 @@ struct PokerGame {
     last_raise_player_idx: usize,
 }
 
+#[derive(Clone, Serialize, Deserialize)]
+struct PlayerDataView {
+    id: PlayerId,
+    bet: u64,
+    folded: bool,
+    allin: bool,
+}
+
+#[derive(Clone, Serialize, Deserialize)]
+struct PokerGameView {
+    current_round: PokerRound,
+    current_bet: u64,
+    player_current_bet: u64,
+    hole_cards: Vec<Card>,
+    drawn_community_cards: Vec<Card>,
+    player_view: Vec<PlayerDataView>,
+}
+
+#[derive(Clone, Serialize, Deserialize)]
 pub enum RuleError {
     NotYourTurn,
     IllegalAction,
@@ -681,7 +701,7 @@ impl PokerGame {
                 if new_bet <= self.current_bet {
                     return Err(RuleError::IllegalAction);
                 }
-                
+
                 // Illegal to raise more than table max
                 if new_bet > self.table_max_bet {
                     return Err(RuleError::IllegalAction);
@@ -720,49 +740,39 @@ impl PokerGame {
         return Ok(());
     }
 
-    pub fn view_for(&self, player_id: PlayerId) -> PokerGame {
-        // Hide community cards and hole cards of other players
-        let mut state = (*self).clone();
-
-        match state.current_round {
-            PokerRound::PreFlop => state.community_cards.clear(),
-            PokerRound::Flop => state.community_cards.truncate(3),
-            PokerRound::Turn => state.community_cards.truncate(4),
-            _ => (),
-        };
-
-        for player in &mut state.player_data {
-            if player.id != player_id {
-                player.hole_cards = vec![];
+    pub fn view_for(&self, player_idx: usize) -> PokerGameView {
+        let drawn_community_cards = match self.current_round {
+            PokerRound::PreFlop => vec![],
+            PokerRound::Flop => {
+                let mut cards = self.community_cards.clone();
+                cards.truncate(3);
+                cards
             }
-        }
-
-        state
-    }
-
-    pub fn view_for_all(&self) -> Vec<PokerGame> {
-        let mut state = (*self).clone();
-
-        match state.current_round {
-            PokerRound::PreFlop => state.community_cards.clear(),
-            PokerRound::Flop => state.community_cards.truncate(3),
-            PokerRound::Turn => state.community_cards.truncate(4),
-            _ => (),
+            PokerRound::Turn => {
+                let mut cards = self.community_cards.clone();
+                cards.truncate(4);
+                cards
+            }
+            _ => self.community_cards.clone(),
         };
 
-        for player in &mut state.player_data {
-            player.hole_cards = vec![];
+        PokerGameView {
+            current_round: self.current_round,
+            current_bet: self.current_bet,
+            player_current_bet: self.player_data[player_idx].bet,
+            hole_cards: self.player_data[player_idx].hole_cards.clone(),
+            drawn_community_cards,
+            player_view: self
+                .player_data
+                .iter()
+                .map(|x| PlayerDataView {
+                    id: x.id,
+                    bet: x.bet,
+                    folded: x.folded,
+                    allin: x.allin,
+                })
+                .collect(),
         }
-
-        let mut returned_states = vec![];
-
-        for i in 0..state.player_data.len() {
-            state.player_data[i].hole_cards = self.player_data[i].hole_cards.clone(); // restore actual hole cards
-            returned_states.push(state.clone());
-            state.player_data[i].hole_cards = vec![]; // empty out again for the next player
-        }
-
-        returned_states
     }
 }
 
@@ -802,8 +812,7 @@ mod tests {
     #[test]
     fn hand_categories_rank_in_order() {
         assert!(
-            PokerHand::RoyalFlush
-                > PokerHand::StraightFlush(Rank::King)
+            PokerHand::RoyalFlush > PokerHand::StraightFlush(Rank::King)
                 && PokerHand::StraightFlush(Rank::King) > PokerHand::Quads(Rank::Ace, Rank::King)
                 && PokerHand::Quads(Rank::Ace, Rank::King)
                     > PokerHand::FullHouse(Rank::Ace, Rank::King)
@@ -811,13 +820,20 @@ mod tests {
                     > PokerHand::Flush(Rank::Ace, Rank::King, Rank::Queen, Rank::Jack, Rank::Nine)
                 && PokerHand::Flush(Rank::Ace, Rank::King, Rank::Queen, Rank::Jack, Rank::Nine)
                     > PokerHand::Straight(Rank::Ace)
-                && PokerHand::Straight(Rank::Ace) > PokerHand::Trips(Rank::Ace, Rank::King, Rank::Queen)
+                && PokerHand::Straight(Rank::Ace)
+                    > PokerHand::Trips(Rank::Ace, Rank::King, Rank::Queen)
                 && PokerHand::Trips(Rank::Ace, Rank::King, Rank::Queen)
                     > PokerHand::TwoPair(Rank::Ace, Rank::King, Rank::Queen)
                 && PokerHand::TwoPair(Rank::Ace, Rank::King, Rank::Queen)
                     > PokerHand::OnePair(Rank::Ace, Rank::King, Rank::Queen, Rank::Jack)
                 && PokerHand::OnePair(Rank::Ace, Rank::King, Rank::Queen, Rank::Jack)
-                    > PokerHand::HighCard(Rank::Ace, Rank::King, Rank::Queen, Rank::Jack, Rank::Nine)
+                    > PokerHand::HighCard(
+                        Rank::Ace,
+                        Rank::King,
+                        Rank::Queen,
+                        Rank::Jack,
+                        Rank::Nine
+                    )
         );
     }
 
@@ -852,7 +868,10 @@ mod tests {
             card(Rank::Eight, Suit::Spades),
             card(Rank::Nine, Suit::Spades),
         ];
-        assert!(matches!(evaluate_holdem_hand(&cards), PokerHand::StraightFlush(..)));
+        assert!(matches!(
+            evaluate_holdem_hand(&cards),
+            PokerHand::StraightFlush(..)
+        ));
     }
 
     // Four of a kind evaluates to quads.
@@ -878,7 +897,10 @@ mod tests {
             card(Rank::King, Suit::Clubs),
             card(Rank::King, Suit::Spades),
         ];
-        assert!(matches!(evaluate_holdem_hand(&cards), PokerHand::FullHouse(..)));
+        assert!(matches!(
+            evaluate_holdem_hand(&cards),
+            PokerHand::FullHouse(..)
+        ));
     }
 
     // Five cards of one suit evaluate to a flush.
@@ -904,7 +926,10 @@ mod tests {
             card(Rank::Eight, Suit::Clubs),
             card(Rank::Nine, Suit::Spades),
         ];
-        assert!(matches!(evaluate_holdem_hand(&cards), PokerHand::Straight(..)));
+        assert!(matches!(
+            evaluate_holdem_hand(&cards),
+            PokerHand::Straight(..)
+        ));
     }
 
     // The A-2-3-4-5 wheel counts as a straight (high card Five).
@@ -917,7 +942,10 @@ mod tests {
             card(Rank::Four, Suit::Clubs),
             card(Rank::Five, Suit::Spades),
         ];
-        assert_eq!(evaluate_holdem_hand(&cards), PokerHand::Straight(Rank::Five));
+        assert_eq!(
+            evaluate_holdem_hand(&cards),
+            PokerHand::Straight(Rank::Five)
+        );
     }
 
     // Three of a kind evaluates to trips.
@@ -943,7 +971,10 @@ mod tests {
             card(Rank::Five, Suit::Clubs),
             card(Rank::King, Suit::Spades),
         ];
-        assert!(matches!(evaluate_holdem_hand(&cards), PokerHand::TwoPair(..)));
+        assert!(matches!(
+            evaluate_holdem_hand(&cards),
+            PokerHand::TwoPair(..)
+        ));
     }
 
     // A single pair evaluates to one pair.
@@ -956,7 +987,10 @@ mod tests {
             card(Rank::Seven, Suit::Clubs),
             card(Rank::Two, Suit::Spades),
         ];
-        assert!(matches!(evaluate_holdem_hand(&cards), PokerHand::OnePair(..)));
+        assert!(matches!(
+            evaluate_holdem_hand(&cards),
+            PokerHand::OnePair(..)
+        ));
     }
 
     // Five unconnected off-suit cards evaluate to high card.
