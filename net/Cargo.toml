@@ -5,3 +5,5 @@ edition = "2024"
 license = "AGPL-3.0-only"
 
 [dependencies]
+quinn = "0.11"
+rustls = "0.23"

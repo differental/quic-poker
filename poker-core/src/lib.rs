@@ -1,13 +1,13 @@
-use std::{cmp::max, fmt, iter::zip};
 use itertools::Itertools;
 use rand::seq::SliceRandom;
+use std::{cmp::max, fmt, iter::zip};
 
 #[derive(Clone, Copy, PartialEq, Eq)]
 enum Suit {
     Spades,
     Hearts,
     Diamonds,
-    Clubs
+    Clubs,
 }
 
 impl fmt::Display for Suit {
@@ -35,7 +35,7 @@ enum Rank {
     Jack,
     Queen,
     King,
-    Ace
+    Ace,
 }
 
 impl fmt::Display for Rank {
@@ -81,7 +81,7 @@ impl From<Rank> for u8 {
 #[derive(Clone, Copy)]
 struct Card {
     suit: Suit,
-    rank: Rank
+    rank: Rank,
 }
 
 impl PartialEq for Card {
@@ -119,226 +119,226 @@ impl fmt::Display for Card {
 const FULL_DECK: [Card; 52] = [
     Card {
         suit: Suit::Spades,
-        rank: Rank::Ace, 
+        rank: Rank::Ace,
     },
     Card {
         suit: Suit::Spades,
-        rank: Rank::Two, 
+        rank: Rank::Two,
     },
     Card {
         suit: Suit::Spades,
-        rank: Rank::Three, 
+        rank: Rank::Three,
     },
     Card {
         suit: Suit::Spades,
-        rank: Rank::Four, 
+        rank: Rank::Four,
     },
     Card {
         suit: Suit::Spades,
-        rank: Rank::Five, 
+        rank: Rank::Five,
     },
     Card {
         suit: Suit::Spades,
-        rank: Rank::Six, 
+        rank: Rank::Six,
     },
     Card {
         suit: Suit::Spades,
-        rank: Rank::Seven, 
+        rank: Rank::Seven,
     },
     Card {
         suit: Suit::Spades,
-        rank: Rank::Eight, 
+        rank: Rank::Eight,
     },
     Card {
         suit: Suit::Spades,
-        rank: Rank::Nine, 
+        rank: Rank::Nine,
     },
     Card {
         suit: Suit::Spades,
-        rank: Rank::Ten, 
+        rank: Rank::Ten,
     },
     Card {
         suit: Suit::Spades,
-        rank: Rank::Jack, 
+        rank: Rank::Jack,
     },
     Card {
         suit: Suit::Spades,
-        rank: Rank::Queen, 
+        rank: Rank::Queen,
     },
     Card {
         suit: Suit::Spades,
-        rank: Rank::King, 
+        rank: Rank::King,
     },
     Card {
         suit: Suit::Diamonds,
-        rank: Rank::Ace, 
+        rank: Rank::Ace,
     },
     Card {
         suit: Suit::Diamonds,
-        rank: Rank::Two, 
+        rank: Rank::Two,
     },
     Card {
         suit: Suit::Diamonds,
-        rank: Rank::Three, 
+        rank: Rank::Three,
     },
     Card {
         suit: Suit::Diamonds,
-        rank: Rank::Four, 
+        rank: Rank::Four,
     },
     Card {
         suit: Suit::Diamonds,
-        rank: Rank::Five, 
+        rank: Rank::Five,
     },
     Card {
         suit: Suit::Diamonds,
-        rank: Rank::Six, 
+        rank: Rank::Six,
     },
     Card {
         suit: Suit::Diamonds,
-        rank: Rank::Seven, 
+        rank: Rank::Seven,
     },
     Card {
         suit: Suit::Diamonds,
-        rank: Rank::Eight, 
+        rank: Rank::Eight,
     },
     Card {
         suit: Suit::Diamonds,
-        rank: Rank::Nine, 
+        rank: Rank::Nine,
     },
     Card {
         suit: Suit::Diamonds,
-        rank: Rank::Ten, 
+        rank: Rank::Ten,
     },
     Card {
         suit: Suit::Diamonds,
-        rank: Rank::Jack, 
+        rank: Rank::Jack,
     },
     Card {
         suit: Suit::Diamonds,
-        rank: Rank::Queen, 
+        rank: Rank::Queen,
     },
     Card {
         suit: Suit::Diamonds,
-        rank: Rank::King, 
+        rank: Rank::King,
     },
     Card {
         suit: Suit::Hearts,
-        rank: Rank::Ace, 
+        rank: Rank::Ace,
     },
     Card {
         suit: Suit::Hearts,
-        rank: Rank::Two, 
+        rank: Rank::Two,
     },
     Card {
         suit: Suit::Hearts,
-        rank: Rank::Three, 
+        rank: Rank::Three,
     },
     Card {
         suit: Suit::Hearts,
-        rank: Rank::Four, 
+        rank: Rank::Four,
     },
     Card {
         suit: Suit::Hearts,
-        rank: Rank::Five, 
+        rank: Rank::Five,
     },
     Card {
         suit: Suit::Hearts,
-        rank: Rank::Six, 
+        rank: Rank::Six,
     },
     Card {
         suit: Suit::Hearts,
-        rank: Rank::Seven, 
+        rank: Rank::Seven,
     },
     Card {
         suit: Suit::Hearts,
-        rank: Rank::Eight, 
+        rank: Rank::Eight,
     },
     Card {
         suit: Suit::Hearts,
-        rank: Rank::Nine, 
+        rank: Rank::Nine,
     },
     Card {
         suit: Suit::Hearts,
-        rank: Rank::Ten, 
+        rank: Rank::Ten,
     },
     Card {
         suit: Suit::Hearts,
-        rank: Rank::Jack, 
+        rank: Rank::Jack,
     },
     Card {
         suit: Suit::Hearts,
-        rank: Rank::Queen, 
+        rank: Rank::Queen,
     },
     Card {
         suit: Suit::Hearts,
-        rank: Rank::King, 
+        rank: Rank::King,
     },
     Card {
         suit: Suit::Clubs,
-        rank: Rank::Ace, 
+        rank: Rank::Ace,
     },
     Card {
         suit: Suit::Clubs,
-        rank: Rank::Two, 
+        rank: Rank::Two,
     },
     Card {
         suit: Suit::Clubs,
-        rank: Rank::Three, 
+        rank: Rank::Three,
     },
     Card {
         suit: Suit::Clubs,
-        rank: Rank::Four, 
+        rank: Rank::Four,
     },
     Card {
         suit: Suit::Clubs,
-        rank: Rank::Five, 
+        rank: Rank::Five,
     },
     Card {
         suit: Suit::Clubs,
-        rank: Rank::Six, 
+        rank: Rank::Six,
     },
     Card {
         suit: Suit::Clubs,
-        rank: Rank::Seven, 
+        rank: Rank::Seven,
     },
     Card {
         suit: Suit::Clubs,
-        rank: Rank::Eight, 
+        rank: Rank::Eight,
     },
     Card {
         suit: Suit::Clubs,
-        rank: Rank::Nine, 
+        rank: Rank::Nine,
     },
     Card {
         suit: Suit::Clubs,
-        rank: Rank::Ten, 
+        rank: Rank::Ten,
     },
     Card {
         suit: Suit::Clubs,
-        rank: Rank::Jack, 
+        rank: Rank::Jack,
     },
     Card {
         suit: Suit::Clubs,
-        rank: Rank::Queen, 
+        rank: Rank::Queen,
     },
     Card {
         suit: Suit::Clubs,
-        rank: Rank::King, 
+        rank: Rank::King,
     },
 ];
 
 #[derive(PartialEq, Eq, PartialOrd, Ord)]
 enum PokerHand {
     RoyalFlush,
-    StraightFlush(Rank), // Only highest card rank
-    Quads(Rank, Rank), // (quad_rank, fifth_card)
+    StraightFlush(Rank),   // Only highest card rank
+    Quads(Rank, Rank),     // (quad_rank, fifth_card)
     FullHouse(Rank, Rank), // (trip_rank, pair_rank)
     Flush(Rank, Rank, Rank, Rank, Rank),
-    Straight(Rank), // Only highest card rank for straight
-    Trips(Rank, Rank, Rank), // (trips, fourth_card, fifth_card)
-    TwoPair(Rank, Rank, Rank), // (large_pair, small_pair, other_card)
+    Straight(Rank),                  // Only highest card rank for straight
+    Trips(Rank, Rank, Rank),         // (trips, fourth_card, fifth_card)
+    TwoPair(Rank, Rank, Rank),       // (large_pair, small_pair, other_card)
     OnePair(Rank, Rank, Rank, Rank), // (pair, ...)
-    HighCard(Rank, Rank, Rank, Rank, Rank)
+    HighCard(Rank, Rank, Rank, Rank, Rank),
 }
 
 fn evaluate_holdem_hand(cards: &[Card]) -> PokerHand {
@@ -364,7 +364,12 @@ fn evaluate_holdem_hand(cards: &[Card]) -> PokerHand {
                 let mut straight_high: Option<Rank> = None;
                 if Into::<u8>::into(unique_ranks[4]) - Into::<u8>::into(unique_ranks[0]) == 4 {
                     straight_high = Some(unique_ranks[4]);
-                } else if unique_ranks.iter().map(|x| Into::<u8>::into(*x)).collect::<Vec<u8>>() == [2, 3, 4, 5, 14] {
+                } else if unique_ranks
+                    .iter()
+                    .map(|x| Into::<u8>::into(*x))
+                    .collect::<Vec<u8>>()
+                    == [2, 3, 4, 5, 14]
+                {
                     // Wrap-around for A-2-3-4-5
                     straight_high = Some(Rank::Five)
                 }
@@ -383,20 +388,25 @@ fn evaluate_holdem_hand(cards: &[Card]) -> PokerHand {
                     PokerHand::Straight(straight_high)
                 } else if is_flush {
                     PokerHand::Flush(
-                        unique_ranks[4], unique_ranks[3],unique_ranks[2],unique_ranks[1],unique_ranks[0]
+                        unique_ranks[4],
+                        unique_ranks[3],
+                        unique_ranks[2],
+                        unique_ranks[1],
+                        unique_ranks[0],
                     )
                 } else {
                     PokerHand::HighCard(
-                        unique_ranks[4], unique_ranks[3],unique_ranks[2],unique_ranks[1],unique_ranks[0]
+                        unique_ranks[4],
+                        unique_ranks[3],
+                        unique_ranks[2],
+                        unique_ranks[1],
+                        unique_ranks[0],
                     )
                 }
             }
             2 => {
                 // Full houses or quads
-                let count_first = cards
-                    .iter()
-                    .filter(|c| c.rank == unique_ranks[0])
-                    .count();
+                let count_first = cards.iter().filter(|c| c.rank == unique_ranks[0]).count();
 
                 match count_first {
                     4 => {
@@ -424,10 +434,7 @@ fn evaluate_holdem_hand(cards: &[Card]) -> PokerHand {
                 let mut trips = None;
                 let mut singulars = Vec::with_capacity(2);
                 for rank in unique_ranks {
-                    let count = cards
-                        .iter()
-                        .filter(|c| c.rank == rank)
-                        .count();
+                    let count = cards.iter().filter(|c| c.rank == rank).count();
                     if count == 2 {
                         pairs.push(rank);
                     } else if count == 3 {
@@ -451,10 +458,7 @@ fn evaluate_holdem_hand(cards: &[Card]) -> PokerHand {
                 let mut double = None;
                 let mut singulars = Vec::with_capacity(4);
                 for rank in unique_ranks {
-                    let count = cards
-                        .iter()
-                        .filter(|c| c.rank == rank)
-                        .count();
+                    let count = cards.iter().filter(|c| c.rank == rank).count();
                     if count == 2 {
                         double = Some(rank);
                     } else {
@@ -474,7 +478,6 @@ fn evaluate_holdem_hand(cards: &[Card]) -> PokerHand {
 
     let mut best_hand = PokerHand::HighCard(Rank::Two, Rank::Two, Rank::Two, Rank::Two, Rank::Two);
 
-
     for combo in cards.iter().combinations(5) {
         let new_hand = evaluate_holdem_hand_of_five(&combo);
 
@@ -491,7 +494,7 @@ pub enum Action {
     Fold,
     Check,
     Call,
-    Raise { to: u64 }
+    Raise { to: u64 },
 }
 
 #[derive(Clone)]
@@ -500,7 +503,7 @@ struct PlayerData {
     hole_cards: Vec<Card>,
     bet: u64,
     folded: bool,
-    allin: bool
+    allin: bool,
 }
 
 #[derive(Clone, Copy)]
@@ -509,7 +512,7 @@ enum PokerRound {
     Flop,
     Turn,
     River,
-    Showdown
+    Showdown,
 }
 
 #[derive(Clone)]
@@ -542,9 +545,15 @@ impl PokerGame {
         let mut player_data = Vec::<PlayerData>::with_capacity(players.len());
 
         for i in 0..players.len() {
-            player_data.push(PlayerData { id: players[i], hole_cards: vec![deck.pop().unwrap(), deck.pop().unwrap()], bet: 0, folded: false, allin: false })
+            player_data.push(PlayerData {
+                id: players[i],
+                hole_cards: vec![deck.pop().unwrap(), deck.pop().unwrap()],
+                bet: 0,
+                folded: false,
+                allin: false,
+            })
         }
-        
+
         player_data[1].bet = small_blind;
         player_data[2].bet = big_blind;
 
@@ -560,7 +569,15 @@ impl PokerGame {
         // Pre-flop betting starts from 3 (or 0 if 3 people) and ends with big blind 2
         // Post-flop betting starts from 1 and ends with button
         let pre_flop_first_player = if players.len() == 3 { 0usize } else { 3usize };
-        PokerGame { current_round: PokerRound::PreFlop, current_bet: big_blind, community_cards, table_max_bet, player_data, player_to_action_idx: pre_flop_first_player, last_raise_player_idx: pre_flop_first_player }
+        PokerGame {
+            current_round: PokerRound::PreFlop,
+            current_bet: big_blind,
+            community_cards,
+            table_max_bet,
+            player_data,
+            player_to_action_idx: pre_flop_first_player,
+            last_raise_player_idx: pre_flop_first_player,
+        }
     }
 
     fn showdown(&self) {
@@ -587,7 +604,7 @@ impl PokerGame {
                 // All players folded or all-ined. Skip to showdown
                 self.current_round = PokerRound::Showdown;
                 self.showdown();
-            },
+            }
             PokerRound::Flop => {
                 self.current_round = PokerRound::Turn;
                 self.last_raise_player_idx = 1;
@@ -605,7 +622,7 @@ impl PokerGame {
                 // All players folded or all-ined. Skip to showdown
                 self.current_round = PokerRound::Showdown;
                 self.showdown();
-            },
+            }
             PokerRound::Turn => {
                 self.current_round = PokerRound::River;
                 self.last_raise_player_idx = 1;
@@ -623,12 +640,12 @@ impl PokerGame {
                 // All players folded or all-ined. Skip to showdown
                 self.current_round = PokerRound::Showdown;
                 self.showdown();
-            },
+            }
             PokerRound::River => {
                 self.current_round = PokerRound::Showdown;
                 self.showdown();
-            },
-            PokerRound::Showdown => unreachable!()
+            }
+            PokerRound::Showdown => unreachable!(),
         }
     }
 
@@ -646,11 +663,11 @@ impl PokerGame {
                     return Err(RuleError::IllegalAction);
                 }
                 // Check: Do nothing
-            },
+            }
             Action::Fold => {
                 // Fold always legal
                 curr_player.folded = true;
-            },
+            }
             Action::Call => {
                 // Call only legal if player bet different from matching bet
                 if curr_player.bet == self.current_bet {
@@ -658,7 +675,7 @@ impl PokerGame {
                 }
                 // Call: Set new bet
                 curr_player.bet = self.current_bet;
-            },
+            }
             Action::Raise { to: new_bet } => {
                 // Raise only legal if new_bet larger than current bet
                 if new_bet <= self.current_bet {
@@ -685,7 +702,7 @@ impl PokerGame {
             if !player.folded && !player.allin {
                 // Found next player
                 self.player_to_action_idx = idx;
-                return Ok(())
+                return Ok(());
             }
 
             idx = (idx + 1) % self.player_data.len();
@@ -694,7 +711,7 @@ impl PokerGame {
         // Current betting round finished. Advance to next round
         self.advance_round();
 
-        return Ok(())
+        return Ok(());
     }
 
     pub fn view_for(&self, player_id: PlayerId) -> PokerGame {
@@ -705,7 +722,7 @@ impl PokerGame {
             PokerRound::PreFlop => state.community_cards.clear(),
             PokerRound::Flop => state.community_cards.truncate(3),
             PokerRound::Turn => state.community_cards.truncate(4),
-            _ => ()
+            _ => (),
         };
 
         for player in &mut state.player_data {
@@ -724,7 +741,7 @@ impl PokerGame {
             PokerRound::PreFlop => state.community_cards.clear(),
             PokerRound::Flop => state.community_cards.truncate(3),
             PokerRound::Turn => state.community_cards.truncate(4),
-            _ => ()
+            _ => (),
         };
 
         for player in &mut state.player_data {
@@ -742,6 +759,3 @@ impl PokerGame {
         returned_states
     }
 }
-
-
-
