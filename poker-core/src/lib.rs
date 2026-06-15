@@ -526,7 +526,7 @@ pub struct PokerGame {
     table_max_bet: u64,
     player_to_action_idx: usize,
     last_raise_player_idx: usize,
-    player_ids_to_idx_map: HashMap<PlayerId, usize>
+    player_ids_to_idx_map: HashMap<PlayerId, usize>,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -545,7 +545,7 @@ pub struct PokerGameView {
     hole_cards: Vec<Card>,
     drawn_community_cards: Vec<Card>,
     player_view: Vec<PlayerDataView>,
-    player_to_action_idx: usize
+    player_to_action_idx: usize,
 }
 
 #[derive(Clone, Serialize, Deserialize)]
@@ -554,7 +554,7 @@ pub enum RuleError {
     CheckOnBet,
     CallOnNoBet,
     BelowMinRaise,
-    ExceedTableMax
+    ExceedTableMax,
 }
 
 impl PokerGame {
@@ -604,7 +604,7 @@ impl PokerGame {
             player_data,
             player_to_action_idx: pre_flop_first_player,
             last_raise_player_idx: pre_flop_first_player,
-            player_ids_to_idx_map
+            player_ids_to_idx_map,
         }
     }
 
@@ -750,7 +750,7 @@ impl PokerGame {
 
     pub fn view_for(&self, player_id: PlayerId) -> PokerGameView {
         let player_idx = *(self.player_ids_to_idx_map.get(&player_id).unwrap());
-        
+
         let drawn_community_cards = match self.current_round {
             PokerRound::PreFlop => vec![],
             PokerRound::Flop => {
@@ -782,7 +782,7 @@ impl PokerGame {
                     allin: x.allin,
                 })
                 .collect(),
-            player_to_action_idx: self.player_to_action_idx
+            player_to_action_idx: self.player_to_action_idx,
         }
     }
 }
@@ -1132,7 +1132,10 @@ mod tests {
         let mut game = game_with_players(3);
         game.current_round = PokerRound::Flop;
         game.community_cards = full_board();
-        assert_eq!(game.view_for(PlayerId(0)).drawn_community_cards, full_board()[..3].to_vec());
+        assert_eq!(
+            game.view_for(PlayerId(0)).drawn_community_cards,
+            full_board()[..3].to_vec()
+        );
     }
 
     // view_for: the turn reveals exactly the first four community cards.
@@ -1141,7 +1144,10 @@ mod tests {
         let mut game = game_with_players(3);
         game.current_round = PokerRound::Turn;
         game.community_cards = full_board();
-        assert_eq!(game.view_for(PlayerId(0)).drawn_community_cards, full_board()[..4].to_vec());
+        assert_eq!(
+            game.view_for(PlayerId(0)).drawn_community_cards,
+            full_board()[..4].to_vec()
+        );
     }
 
     // view_for: the river reveals the whole board.
@@ -1150,7 +1156,10 @@ mod tests {
         let mut game = game_with_players(3);
         game.current_round = PokerRound::River;
         game.community_cards = full_board();
-        assert_eq!(game.view_for(PlayerId(0)).drawn_community_cards, full_board());
+        assert_eq!(
+            game.view_for(PlayerId(0)).drawn_community_cards,
+            full_board()
+        );
     }
 
     // view_for: showdown reveals the whole board.
@@ -1159,14 +1168,20 @@ mod tests {
         let mut game = game_with_players(3);
         game.current_round = PokerRound::Showdown;
         game.community_cards = full_board();
-        assert_eq!(game.view_for(PlayerId(0)).drawn_community_cards, full_board());
+        assert_eq!(
+            game.view_for(PlayerId(0)).drawn_community_cards,
+            full_board()
+        );
     }
 
     // view_for: a player id is resolved to the right seat via the id->index map.
     #[test]
     fn view_resolves_player_id_to_correct_seat() {
         let mut game = game_with_players(3);
-        let theirs = vec![card(Rank::Queen, Suit::Spades), card(Rank::Jack, Suit::Hearts)];
+        let theirs = vec![
+            card(Rank::Queen, Suit::Spades),
+            card(Rank::Jack, Suit::Hearts),
+        ];
         game.player_data[2].hole_cards = theirs.clone();
         game.player_data[2].bet = 250;
 
@@ -1179,9 +1194,15 @@ mod tests {
     #[test]
     fn view_exposes_only_requesters_hole_cards() {
         let mut game = game_with_players(3);
-        let mine = vec![card(Rank::Ace, Suit::Spades), card(Rank::King, Suit::Hearts)];
+        let mine = vec![
+            card(Rank::Ace, Suit::Spades),
+            card(Rank::King, Suit::Hearts),
+        ];
         game.player_data[0].hole_cards = mine.clone();
-        game.player_data[1].hole_cards = vec![card(Rank::Two, Suit::Clubs), card(Rank::Three, Suit::Diamonds)];
+        game.player_data[1].hole_cards = vec![
+            card(Rank::Two, Suit::Clubs),
+            card(Rank::Three, Suit::Diamonds),
+        ];
 
         let view = game.view_for(PlayerId(0));
         assert_eq!(view.hole_cards, mine);

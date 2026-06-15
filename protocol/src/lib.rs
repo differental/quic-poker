@@ -15,7 +15,7 @@ pub enum ServerMessage {
 pub enum ClientMessage {
     // All messages from client to server.
     JoinTableRequest,
-    Action(Action)
+    Action(Action),
 }
 
 pub fn encode<T: Serialize>(message: &T) -> String {
