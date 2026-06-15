@@ -1,5 +1,6 @@
-use std::{cmp::max, fmt};
+use std::{cmp::max, fmt, iter::zip};
 use itertools::Itertools;
+use rand::seq::SliceRandom;
 
 #[derive(Clone, Copy, PartialEq, Eq)]
 enum Suit {
@@ -77,6 +78,7 @@ impl From<Rank> for u8 {
     }
 }
 
+#[derive(Clone, Copy)]
 struct Card {
     suit: Suit,
     rank: Rank
@@ -482,9 +484,264 @@ fn evaluate_holdem_hand(cards: &[Card]) -> PokerHand {
     best_hand
 }
 
+#[derive(PartialEq, Eq, Clone, Copy)]
+pub struct PlayerId(pub u32);
 
+pub enum Action {
+    Fold,
+    Check,
+    Call,
+    Raise { to: u64 }
+}
 
+#[derive(Clone)]
+struct PlayerData {
+    id: PlayerId,
+    hole_cards: Vec<Card>,
+    bet: u64,
+    folded: bool,
+    allin: bool
+}
 
+#[derive(Clone, Copy)]
+enum PokerRound {
+    PreFlop,
+    Flop,
+    Turn,
+    River,
+    Showdown
+}
+
+#[derive(Clone)]
+struct PokerGame {
+    current_round: PokerRound,
+    current_bet: u64,
+    community_cards: Vec<Card>,
+    player_data: Vec<PlayerData>,
+    table_max_bet: u64,
+    player_to_action_idx: usize,
+    last_raise_player_idx: usize,
+}
+
+pub enum RuleError {
+    NotYourTurn,
+    IllegalAction,
+    // ...
+}
+
+impl PokerGame {
+    pub fn new(players: &[PlayerId], small_blind: u64, big_blind: u64, table_max_bet: u64) -> Self {
+        // Start new poker game
+        assert!(players.len() >= 3); // min 3 players per game for now
+        assert!(players.len() <= 10); // max 10 players per game for now
+
+        let mut rng = rand::rng();
+        let mut deck = Vec::from(FULL_DECK);
+        deck.shuffle(&mut rng);
+
+        let mut player_data = Vec::<PlayerData>::with_capacity(players.len());
+
+        for i in 0..players.len() {
+            player_data.push(PlayerData { id: players[i], hole_cards: vec![deck.pop().unwrap(), deck.pop().unwrap()], bet: 0, folded: false, allin: false })
+        }
+        
+        player_data[1].bet = small_blind;
+        player_data[2].bet = big_blind;
+
+        let community_cards = vec![
+            deck.pop().unwrap(),
+            deck.pop().unwrap(),
+            deck.pop().unwrap(),
+            deck.pop().unwrap(),
+            deck.pop().unwrap(),
+        ];
+
+        // players[0] is button, [1] is small blind, [2] is big blind
+        // Pre-flop betting starts from 3 (or 0 if 3 people) and ends with big blind 2
+        // Post-flop betting starts from 1 and ends with button
+        let pre_flop_first_player = if players.len() == 3 { 0usize } else { 3usize };
+        PokerGame { current_round: PokerRound::PreFlop, current_bet: big_blind, community_cards, table_max_bet, player_data, player_to_action_idx: pre_flop_first_player, last_raise_player_idx: pre_flop_first_player }
+    }
+
+    fn showdown(&self) {
+        // Do showdown stuff
+    }
+
+    fn advance_round(&mut self) {
+        // Advance to next round. Executes showdown if called on a river-round game.
+        match self.current_round {
+            PokerRound::PreFlop => {
+                self.current_round = PokerRound::Flop;
+                self.last_raise_player_idx = 1;
+
+                // Find first player starting from small blind (1) that can action
+                for idx in (1..=100).chain(std::iter::once(0)) {
+                    let player = &self.player_data[idx];
+                    if !player.folded && !player.allin {
+                        // Found next player
+                        self.player_to_action_idx = idx;
+                        return;
+                    }
+                }
+
+                // All players folded or all-ined. Skip to showdown
+                self.current_round = PokerRound::Showdown;
+                self.showdown();
+            },
+            PokerRound::Flop => {
+                self.current_round = PokerRound::Turn;
+                self.last_raise_player_idx = 1;
+
+                // Find first player starting from small blind (1) that can action
+                for idx in (1..=100).chain(std::iter::once(0)) {
+                    let player = &self.player_data[idx];
+                    if !player.folded && !player.allin {
+                        // Found next player
+                        self.player_to_action_idx = idx;
+                        return;
+                    }
+                }
+
+                // All players folded or all-ined. Skip to showdown
+                self.current_round = PokerRound::Showdown;
+                self.showdown();
+            },
+            PokerRound::Turn => {
+                self.current_round = PokerRound::River;
+                self.last_raise_player_idx = 1;
+
+                // Find first player starting from small blind (1) that can action
+                for idx in (1..=100).chain(std::iter::once(0)) {
+                    let player = &self.player_data[idx];
+                    if !player.folded && !player.allin {
+                        // Found next player
+                        self.player_to_action_idx = idx;
+                        return;
+                    }
+                }
+
+                // All players folded or all-ined. Skip to showdown
+                self.current_round = PokerRound::Showdown;
+                self.showdown();
+            },
+            PokerRound::River => {
+                self.current_round = PokerRound::Showdown;
+                self.showdown();
+            },
+            PokerRound::Showdown => unreachable!()
+        }
+    }
+
+    pub fn action(&mut self, player_id: PlayerId, action: Action) -> Result<(), RuleError> {
+        let curr_player = &mut self.player_data[self.player_to_action_idx];
+
+        if player_id != curr_player.id {
+            return Err(RuleError::NotYourTurn);
+        }
+
+        match action {
+            Action::Check => {
+                // Check only legal if player already has matching bet
+                if curr_player.bet != self.current_bet {
+                    return Err(RuleError::IllegalAction);
+                }
+                // Check: Do nothing
+            },
+            Action::Fold => {
+                // Fold always legal
+                curr_player.folded = true;
+            },
+            Action::Call => {
+                // Call only legal if player bet different from matching bet
+                if curr_player.bet == self.current_bet {
+                    return Err(RuleError::IllegalAction);
+                }
+                // Call: Set new bet
+                curr_player.bet = self.current_bet;
+            },
+            Action::Raise { to: new_bet } => {
+                // Raise only legal if new_bet larger than current bet
+                if new_bet <= self.current_bet {
+                    return Err(RuleError::IllegalAction);
+                }
+                // Raise: Set user bet as well as table current bet
+                self.current_bet = new_bet;
+                curr_player.bet = new_bet;
+                // Update last raise to the current player
+                self.last_raise_player_idx = self.player_to_action_idx;
+
+                // If user bet is same as table max bet, it's effectively an "all-in"
+                if new_bet == self.table_max_bet {
+                    curr_player.allin = true;
+                }
+            }
+        }
+
+        // Advance to next person
+        let mut idx = (self.player_to_action_idx + 1) % self.player_data.len();
+
+        while idx != self.last_raise_player_idx {
+            let player = &self.player_data[idx];
+            if !player.folded && !player.allin {
+                // Found next player
+                self.player_to_action_idx = idx;
+                return Ok(())
+            }
+
+            idx = (idx + 1) % self.player_data.len();
+        }
+
+        // Current betting round finished. Advance to next round
+        self.advance_round();
+
+        return Ok(())
+    }
+
+    pub fn view_for(&self, player_id: PlayerId) -> PokerGame {
+        // Hide community cards and hole cards of other players
+        let mut state = (*self).clone();
+
+        match state.current_round {
+            PokerRound::PreFlop => state.community_cards.clear(),
+            PokerRound::Flop => state.community_cards.truncate(3),
+            PokerRound::Turn => state.community_cards.truncate(4),
+            _ => ()
+        };
+
+        for player in &mut state.player_data {
+            if player.id != player_id {
+                player.hole_cards = vec![];
+            }
+        }
+
+        state
+    }
+
+    pub fn view_for_all(&self) -> Vec<PokerGame> {
+        let mut state = (*self).clone();
+
+        match state.current_round {
+            PokerRound::PreFlop => state.community_cards.clear(),
+            PokerRound::Flop => state.community_cards.truncate(3),
+            PokerRound::Turn => state.community_cards.truncate(4),
+            _ => ()
+        };
+
+        for player in &mut state.player_data {
+            player.hole_cards = vec![];
+        }
+
+        let mut returned_states = vec![];
+
+        for i in 0..state.player_data.len() {
+            state.player_data[i].hole_cards = self.player_data[i].hole_cards.clone(); // restore actual hole cards
+            returned_states.push(state.clone());
+            state.player_data[i].hole_cards = vec![]; // empty out again for the next player
+        }
+
+        returned_states
+    }
+}
 
 
 
