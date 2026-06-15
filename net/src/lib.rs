@@ -1,8 +1,8 @@
 use std::{error::Error, sync::Arc};
 
 use quinn::{
-    ClientConfig, ServerConfig,
-    crypto::rustls::{QuicClientConfig, QuicServerConfig},
+    ServerConfig,
+    crypto::rustls::{QuicServerConfig},
 };
 use rustls::pki_types::{CertificateDer, PrivateKeyDer, PrivatePkcs8KeyDer};
 
@@ -22,20 +22,10 @@ pub fn configure_server(
     )))
 }
 
-pub fn configure_client() -> Result<ClientConfig, Box<dyn Error>> {
-    // Use the Mozilla CA root certificate store
-    let roots = rustls::RootCertStore {
-        roots: webpki_roots::TLS_SERVER_ROOTS.to_vec(),
-    };
+mod cert;
 
-    let crypto = rustls::ClientConfig::builder_with_provider(Arc::new(
-        rustls::crypto::ring::default_provider(),
-    ))
-    .with_safe_default_protocol_versions()?
-    .with_root_certificates(roots)
-    .with_no_client_auth();
+#[cfg(feature = "dev")]
+pub use cert::dev::configure_client;
 
-    Ok(ClientConfig::new(Arc::new(QuicClientConfig::try_from(
-        crypto,
-    )?)))
-}
+#[cfg(not(feature = "dev"))]
+pub use cert::prod::configure_client;
