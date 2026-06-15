@@ -488,7 +488,7 @@ fn evaluate_holdem_hand(cards: &[Card]) -> PokerHand {
     best_hand
 }
 
-#[derive(PartialEq, Eq, Clone, Copy, Serialize, Deserialize)]
+#[derive(PartialEq, Eq, Clone, Copy, Debug, Serialize, Deserialize)]
 pub struct PlayerId(pub u32);
 
 #[derive(Clone, Copy, Serialize, Deserialize)]
@@ -543,6 +543,7 @@ struct PokerGameView {
     hole_cards: Vec<Card>,
     drawn_community_cards: Vec<Card>,
     player_view: Vec<PlayerDataView>,
+    player_to_action_idx: usize
 }
 
 #[derive(Clone, Serialize, Deserialize)]
@@ -741,6 +742,8 @@ impl PokerGame {
     }
 
     pub fn view_for(&self, player_idx: usize) -> PokerGameView {
+        assert!(player_idx <= self.player_data.len());
+        
         let drawn_community_cards = match self.current_round {
             PokerRound::PreFlop => vec![],
             PokerRound::Flop => {
@@ -772,6 +775,7 @@ impl PokerGame {
                     allin: x.allin,
                 })
                 .collect(),
+            player_to_action_idx: self.player_to_action_idx
         }
     }
 }
@@ -1086,5 +1090,98 @@ mod tests {
     fn cards_compare_by_rank_only() {
         assert_eq!(card(Rank::Ace, Suit::Spades), card(Rank::Ace, Suit::Hearts));
         assert!(card(Rank::Ace, Suit::Spades) > card(Rank::King, Suit::Spades));
+    }
+
+    // A fixed five-card board for view_for tests.
+    fn full_board() -> Vec<Card> {
+        vec![
+            card(Rank::Two, Suit::Spades),
+            card(Rank::Seven, Suit::Hearts),
+            card(Rank::Ten, Suit::Diamonds),
+            card(Rank::Jack, Suit::Clubs),
+            card(Rank::Ace, Suit::Spades),
+        ]
+    }
+
+    // view_for: pre-flop reveals none of the board.
+    #[test]
+    fn view_hides_board_preflop() {
+        let mut game = game_with_players(3);
+        game.community_cards = full_board();
+        assert!(game.view_for(0).drawn_community_cards.is_empty());
+    }
+
+    // view_for: the flop reveals exactly the first three community cards.
+    #[test]
+    fn view_reveals_three_on_flop() {
+        let mut game = game_with_players(3);
+        game.current_round = PokerRound::Flop;
+        game.community_cards = full_board();
+        assert_eq!(game.view_for(0).drawn_community_cards, full_board()[..3].to_vec());
+    }
+
+    // view_for: the turn reveals exactly the first four community cards.
+    #[test]
+    fn view_reveals_four_on_turn() {
+        let mut game = game_with_players(3);
+        game.current_round = PokerRound::Turn;
+        game.community_cards = full_board();
+        assert_eq!(game.view_for(0).drawn_community_cards, full_board()[..4].to_vec());
+    }
+
+    // view_for: the river reveals the whole board.
+    #[test]
+    fn view_reveals_full_board_on_river() {
+        let mut game = game_with_players(3);
+        game.current_round = PokerRound::River;
+        game.community_cards = full_board();
+        assert_eq!(game.view_for(0).drawn_community_cards, full_board());
+    }
+
+    // view_for: showdown reveals the whole board.
+    #[test]
+    fn view_reveals_full_board_on_showdown() {
+        let mut game = game_with_players(3);
+        game.current_round = PokerRound::Showdown;
+        game.community_cards = full_board();
+        assert_eq!(game.view_for(0).drawn_community_cards, full_board());
+    }
+
+    // view_for: only the requesting player's hole cards are exposed.
+    #[test]
+    fn view_exposes_only_requesters_hole_cards() {
+        let mut game = game_with_players(3);
+        let mine = vec![card(Rank::Ace, Suit::Spades), card(Rank::King, Suit::Hearts)];
+        game.player_data[0].hole_cards = mine.clone();
+        game.player_data[1].hole_cards = vec![card(Rank::Two, Suit::Clubs), card(Rank::Three, Suit::Diamonds)];
+
+        let view = game.view_for(0);
+        assert_eq!(view.hole_cards, mine);
+        // player_view carries public state only — there is no hole_cards field at all.
+        assert_eq!(view.player_view.len(), 3);
+    }
+
+    // view_for: player_current_bet reflects the requesting player's own bet.
+    #[test]
+    fn view_reports_requesters_own_bet() {
+        let mut game = game_with_players(3);
+        game.player_data[2].bet = 500;
+        assert_eq!(game.view_for(2).player_current_bet, 500);
+    }
+
+    // view_for: player_view mirrors every player's public state in seat order.
+    #[test]
+    fn view_player_view_mirrors_public_state() {
+        let mut game = game_with_players(3);
+        game.player_data[1].folded = true;
+        game.player_data[2].allin = true;
+        game.player_data[2].bet = 9_000;
+
+        let view = game.view_for(0);
+        assert_eq!(view.player_view.len(), 3);
+        assert_eq!(view.player_view[0].id, PlayerId(0));
+        assert!(view.player_view[1].folded);
+        assert!(view.player_view[2].allin);
+        assert_eq!(view.player_view[2].bet, 9_000);
     }
 }
