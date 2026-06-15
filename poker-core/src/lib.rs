@@ -1,7 +1,7 @@
 use itertools::Itertools;
 use rand::seq::SliceRandom;
 use serde::{Deserialize, Serialize};
-use std::{cmp::max, fmt};
+use std::{cmp::max, collections::HashMap, fmt};
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug, Serialize, Deserialize)]
 enum Suit {
@@ -488,10 +488,10 @@ fn evaluate_holdem_hand(cards: &[Card]) -> PokerHand {
     best_hand
 }
 
-#[derive(PartialEq, Eq, Clone, Copy, Debug, Serialize, Deserialize)]
+#[derive(PartialEq, Eq, Clone, Copy, Debug, Hash, Serialize, Deserialize)]
 pub struct PlayerId(pub u32);
 
-#[derive(Clone, Copy, Serialize, Deserialize)]
+#[derive(Clone, Copy, Debug, Serialize, Deserialize)]
 pub enum Action {
     Fold,
     Check,
@@ -499,7 +499,7 @@ pub enum Action {
     Raise { to: u64 },
 }
 
-#[derive(Clone, Serialize, Deserialize)]
+#[derive(Clone, Debug, Serialize, Deserialize)]
 struct PlayerData {
     id: PlayerId,
     hole_cards: Vec<Card>,
@@ -508,7 +508,7 @@ struct PlayerData {
     allin: bool,
 }
 
-#[derive(Clone, Copy, Serialize, Deserialize)]
+#[derive(Clone, Copy, Debug, Serialize, Deserialize)]
 enum PokerRound {
     PreFlop,
     Flop,
@@ -517,7 +517,8 @@ enum PokerRound {
     Showdown,
 }
 
-struct PokerGame {
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct PokerGame {
     current_round: PokerRound,
     current_bet: u64,
     community_cards: Vec<Card>,
@@ -525,10 +526,11 @@ struct PokerGame {
     table_max_bet: u64,
     player_to_action_idx: usize,
     last_raise_player_idx: usize,
+    player_ids_to_idx_map: HashMap<PlayerId, usize>
 }
 
-#[derive(Clone, Serialize, Deserialize)]
-struct PlayerDataView {
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct PlayerDataView {
     id: PlayerId,
     bet: u64,
     folded: bool,
@@ -536,7 +538,7 @@ struct PlayerDataView {
 }
 
 #[derive(Clone, Serialize, Deserialize)]
-struct PokerGameView {
+pub struct PokerGameView {
     current_round: PokerRound,
     current_bet: u64,
     player_current_bet: u64,
@@ -549,8 +551,10 @@ struct PokerGameView {
 #[derive(Clone, Serialize, Deserialize)]
 pub enum RuleError {
     NotYourTurn,
-    IllegalAction,
-    // ...
+    CheckOnBet,
+    CallOnNoBet,
+    BelowMinRaise,
+    ExceedTableMax
 }
 
 impl PokerGame {
@@ -564,6 +568,7 @@ impl PokerGame {
         deck.shuffle(&mut rng);
 
         let mut player_data = Vec::<PlayerData>::with_capacity(players.len());
+        let mut player_ids_to_idx_map = HashMap::new();
 
         for i in 0..players.len() {
             player_data.push(PlayerData {
@@ -572,7 +577,8 @@ impl PokerGame {
                 bet: 0,
                 folded: false,
                 allin: false,
-            })
+            });
+            player_ids_to_idx_map.insert(players[i], i);
         }
 
         player_data[1].bet = small_blind;
@@ -598,6 +604,7 @@ impl PokerGame {
             player_data,
             player_to_action_idx: pre_flop_first_player,
             last_raise_player_idx: pre_flop_first_player,
+            player_ids_to_idx_map
         }
     }
 
@@ -681,7 +688,7 @@ impl PokerGame {
             Action::Check => {
                 // Check only legal if player already has matching bet
                 if curr_player.bet != self.current_bet {
-                    return Err(RuleError::IllegalAction);
+                    return Err(RuleError::CheckOnBet);
                 }
                 // Check: Do nothing
             }
@@ -692,7 +699,7 @@ impl PokerGame {
             Action::Call => {
                 // Call only legal if player bet different from matching bet
                 if curr_player.bet == self.current_bet {
-                    return Err(RuleError::IllegalAction);
+                    return Err(RuleError::CallOnNoBet);
                 }
                 // Call: Set new bet
                 curr_player.bet = self.current_bet;
@@ -700,12 +707,12 @@ impl PokerGame {
             Action::Raise { to: new_bet } => {
                 // Raise only legal if new_bet larger than current bet
                 if new_bet <= self.current_bet {
-                    return Err(RuleError::IllegalAction);
+                    return Err(RuleError::BelowMinRaise);
                 }
 
                 // Illegal to raise more than table max
                 if new_bet > self.table_max_bet {
-                    return Err(RuleError::IllegalAction);
+                    return Err(RuleError::ExceedTableMax);
                 }
 
                 // Raise: Set user bet as well as table current bet
@@ -741,8 +748,8 @@ impl PokerGame {
         return Ok(());
     }
 
-    pub fn view_for(&self, player_idx: usize) -> PokerGameView {
-        assert!(player_idx <= self.player_data.len());
+    pub fn view_for(&self, player_id: PlayerId) -> PokerGameView {
+        let player_idx = *(self.player_ids_to_idx_map.get(&player_id).unwrap());
         
         let drawn_community_cards = match self.current_round {
             PokerRound::PreFlop => vec![],
@@ -792,7 +799,7 @@ mod tests {
     /// fields can be controlled. Mirrors what `PokerGame::new` would produce for
     /// the parts the betting/round logic cares about.
     fn game_with_players(n: usize) -> PokerGame {
-        let player_data = (0..n)
+        let player_data: Vec<PlayerData> = (0..n)
             .map(|i| PlayerData {
                 id: PlayerId(i as u32),
                 hole_cards: vec![],
@@ -801,6 +808,13 @@ mod tests {
                 allin: false,
             })
             .collect();
+
+        let player_ids_to_idx_map = player_data
+            .iter()
+            .enumerate()
+            .map(|(i, p)| (p.id, i))
+            .collect();
+
         PokerGame {
             current_round: PokerRound::PreFlop,
             current_bet: 100,
@@ -809,6 +823,7 @@ mod tests {
             table_max_bet: 10_000,
             player_to_action_idx: 0,
             last_raise_player_idx: 0,
+            player_ids_to_idx_map,
         }
     }
 
@@ -1108,7 +1123,7 @@ mod tests {
     fn view_hides_board_preflop() {
         let mut game = game_with_players(3);
         game.community_cards = full_board();
-        assert!(game.view_for(0).drawn_community_cards.is_empty());
+        assert!(game.view_for(PlayerId(0)).drawn_community_cards.is_empty());
     }
 
     // view_for: the flop reveals exactly the first three community cards.
@@ -1117,7 +1132,7 @@ mod tests {
         let mut game = game_with_players(3);
         game.current_round = PokerRound::Flop;
         game.community_cards = full_board();
-        assert_eq!(game.view_for(0).drawn_community_cards, full_board()[..3].to_vec());
+        assert_eq!(game.view_for(PlayerId(0)).drawn_community_cards, full_board()[..3].to_vec());
     }
 
     // view_for: the turn reveals exactly the first four community cards.
@@ -1126,7 +1141,7 @@ mod tests {
         let mut game = game_with_players(3);
         game.current_round = PokerRound::Turn;
         game.community_cards = full_board();
-        assert_eq!(game.view_for(0).drawn_community_cards, full_board()[..4].to_vec());
+        assert_eq!(game.view_for(PlayerId(0)).drawn_community_cards, full_board()[..4].to_vec());
     }
 
     // view_for: the river reveals the whole board.
@@ -1135,7 +1150,7 @@ mod tests {
         let mut game = game_with_players(3);
         game.current_round = PokerRound::River;
         game.community_cards = full_board();
-        assert_eq!(game.view_for(0).drawn_community_cards, full_board());
+        assert_eq!(game.view_for(PlayerId(0)).drawn_community_cards, full_board());
     }
 
     // view_for: showdown reveals the whole board.
@@ -1144,7 +1159,20 @@ mod tests {
         let mut game = game_with_players(3);
         game.current_round = PokerRound::Showdown;
         game.community_cards = full_board();
-        assert_eq!(game.view_for(0).drawn_community_cards, full_board());
+        assert_eq!(game.view_for(PlayerId(0)).drawn_community_cards, full_board());
+    }
+
+    // view_for: a player id is resolved to the right seat via the id->index map.
+    #[test]
+    fn view_resolves_player_id_to_correct_seat() {
+        let mut game = game_with_players(3);
+        let theirs = vec![card(Rank::Queen, Suit::Spades), card(Rank::Jack, Suit::Hearts)];
+        game.player_data[2].hole_cards = theirs.clone();
+        game.player_data[2].bet = 250;
+
+        let view = game.view_for(PlayerId(2));
+        assert_eq!(view.hole_cards, theirs);
+        assert_eq!(view.player_current_bet, 250);
     }
 
     // view_for: only the requesting player's hole cards are exposed.
@@ -1155,7 +1183,7 @@ mod tests {
         game.player_data[0].hole_cards = mine.clone();
         game.player_data[1].hole_cards = vec![card(Rank::Two, Suit::Clubs), card(Rank::Three, Suit::Diamonds)];
 
-        let view = game.view_for(0);
+        let view = game.view_for(PlayerId(0));
         assert_eq!(view.hole_cards, mine);
         // player_view carries public state only — there is no hole_cards field at all.
         assert_eq!(view.player_view.len(), 3);
@@ -1166,7 +1194,15 @@ mod tests {
     fn view_reports_requesters_own_bet() {
         let mut game = game_with_players(3);
         game.player_data[2].bet = 500;
-        assert_eq!(game.view_for(2).player_current_bet, 500);
+        assert_eq!(game.view_for(PlayerId(2)).player_current_bet, 500);
+    }
+
+    // view_for: the view surfaces whose turn it is to act.
+    #[test]
+    fn view_reports_player_to_action() {
+        let mut game = game_with_players(3);
+        game.player_to_action_idx = 2;
+        assert_eq!(game.view_for(PlayerId(0)).player_to_action_idx, 2);
     }
 
     // view_for: player_view mirrors every player's public state in seat order.
@@ -1177,7 +1213,7 @@ mod tests {
         game.player_data[2].allin = true;
         game.player_data[2].bet = 9_000;
 
-        let view = game.view_for(0);
+        let view = game.view_for(PlayerId(0));
         assert_eq!(view.player_view.len(), 3);
         assert_eq!(view.player_view[0].id, PlayerId(0));
         assert!(view.player_view[1].folded);
