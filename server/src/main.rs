@@ -25,6 +25,7 @@ struct ServerState {
     players: HashMap<usize, PlayerId>, // keys: connection.stable_id()
     next_player_id: PlayerId,
     player_id_to_table_map: HashMap<PlayerId, TableId>,
+    connections: HashMap<PlayerId, Connection>, // Connection objects required to notify all players
 }
 
 impl ServerState {
@@ -35,6 +36,7 @@ impl ServerState {
             players: HashMap::new(),
             next_player_id: PlayerId(0),
             player_id_to_table_map: HashMap::new(),
+            connections: HashMap::new(),
         }
     }
 
@@ -45,6 +47,7 @@ impl ServerState {
         }
         let player_id = self.next_player_id;
         self.players.insert(key, player_id);
+        self.connections.insert(player_id, conn.clone());
         self.next_player_id.0 += 1;
         println!("New player #{player_id:?}: {key}");
         Some(player_id)
@@ -166,6 +169,32 @@ impl ServerState {
                 .map_err(|re| ActionError::Rule(re)),
         }
     }
+
+    pub async fn notify_table(&self, table: TableId) -> Result<(), anyhow::Error> {
+        let curr_table = self.tables.get(&table).unwrap();
+
+        match curr_table {
+            TableState::Lobby(_) => {
+                panic!("Cannot notify participants of a game that's not ongoing!")
+            }
+            TableState::Game(game) => {
+                let players = game.get_player_ids();
+
+                for player_id in players {
+                    let view = game.view_for(player_id);
+                    let conn = &self.connections[&player_id];
+                    net::push(conn, &ServerMessage::StateUpdate(view)).await?;
+
+                    // Notify next player
+                    if game.is_next_player(player_id) {
+                        net::push(conn, &ServerMessage::ItsYourTurn).await?;
+                    }
+                }
+            }
+        }
+
+        Ok(())
+    }
 }
 
 #[tokio::main]
@@ -254,7 +283,15 @@ async fn main() -> Result<(), anyhow::Error> {
                         match state.lookup_player(&connection) {
                             Some(player_id) => {
                                 match state.execute_poker_action(player_id, action) {
-                                    Ok(()) => ServerMessage::ActionAccepted,
+                                    Ok(()) => {
+                                        // Notify entire table
+                                        let table_id = state.player_id_to_table_map[&player_id];
+                                        let _ = state.notify_table(table_id).await; // Update fails silently
+
+                                        // Notify next player
+
+                                        ServerMessage::ActionAccepted
+                                    }
                                     Err(err) => ServerMessage::ActionRejected(err),
                                 }
                             }

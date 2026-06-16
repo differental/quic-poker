@@ -752,6 +752,15 @@ impl PokerGame {
         return Ok(());
     }
 
+    pub fn get_player_ids(&self) -> Vec<PlayerId> {
+        self.player_data.iter().map(|x| x.id).collect()
+    }
+
+    pub fn is_next_player(&self, player_id: PlayerId) -> bool {
+        let player_idx = self.player_ids_to_idx_map[&player_id];
+        player_idx == self.player_to_action_idx
+    }
+
     pub fn view_for(&self, player_id: PlayerId) -> PokerGameView {
         let player_idx = *(self.player_ids_to_idx_map.get(&player_id).unwrap());
 
