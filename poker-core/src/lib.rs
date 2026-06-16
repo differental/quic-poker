@@ -1,7 +1,7 @@
 use itertools::Itertools;
 use rand::seq::SliceRandom;
 use serde::{Deserialize, Serialize};
-use std::{cmp::max, collections::HashMap, fmt};
+use std::{cmp::max, collections::HashMap, fmt, sync::LazyLock};
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug, Serialize, Deserialize)]
 enum Suit {
@@ -117,216 +117,37 @@ impl fmt::Display for Card {
     }
 }
 
-const FULL_DECK: [Card; 52] = [
-    Card {
-        suit: Suit::Spades,
-        rank: Rank::Ace,
-    },
-    Card {
-        suit: Suit::Spades,
-        rank: Rank::Two,
-    },
-    Card {
-        suit: Suit::Spades,
-        rank: Rank::Three,
-    },
-    Card {
-        suit: Suit::Spades,
-        rank: Rank::Four,
-    },
-    Card {
-        suit: Suit::Spades,
-        rank: Rank::Five,
-    },
-    Card {
-        suit: Suit::Spades,
-        rank: Rank::Six,
-    },
-    Card {
-        suit: Suit::Spades,
-        rank: Rank::Seven,
-    },
-    Card {
-        suit: Suit::Spades,
-        rank: Rank::Eight,
-    },
-    Card {
-        suit: Suit::Spades,
-        rank: Rank::Nine,
-    },
-    Card {
-        suit: Suit::Spades,
-        rank: Rank::Ten,
-    },
-    Card {
-        suit: Suit::Spades,
-        rank: Rank::Jack,
-    },
-    Card {
-        suit: Suit::Spades,
-        rank: Rank::Queen,
-    },
-    Card {
-        suit: Suit::Spades,
-        rank: Rank::King,
-    },
-    Card {
-        suit: Suit::Diamonds,
-        rank: Rank::Ace,
-    },
-    Card {
-        suit: Suit::Diamonds,
-        rank: Rank::Two,
-    },
-    Card {
-        suit: Suit::Diamonds,
-        rank: Rank::Three,
-    },
-    Card {
-        suit: Suit::Diamonds,
-        rank: Rank::Four,
-    },
-    Card {
-        suit: Suit::Diamonds,
-        rank: Rank::Five,
-    },
-    Card {
-        suit: Suit::Diamonds,
-        rank: Rank::Six,
-    },
-    Card {
-        suit: Suit::Diamonds,
-        rank: Rank::Seven,
-    },
-    Card {
-        suit: Suit::Diamonds,
-        rank: Rank::Eight,
-    },
-    Card {
-        suit: Suit::Diamonds,
-        rank: Rank::Nine,
-    },
-    Card {
-        suit: Suit::Diamonds,
-        rank: Rank::Ten,
-    },
-    Card {
-        suit: Suit::Diamonds,
-        rank: Rank::Jack,
-    },
-    Card {
-        suit: Suit::Diamonds,
-        rank: Rank::Queen,
-    },
-    Card {
-        suit: Suit::Diamonds,
-        rank: Rank::King,
-    },
-    Card {
-        suit: Suit::Hearts,
-        rank: Rank::Ace,
-    },
-    Card {
-        suit: Suit::Hearts,
-        rank: Rank::Two,
-    },
-    Card {
-        suit: Suit::Hearts,
-        rank: Rank::Three,
-    },
-    Card {
-        suit: Suit::Hearts,
-        rank: Rank::Four,
-    },
-    Card {
-        suit: Suit::Hearts,
-        rank: Rank::Five,
-    },
-    Card {
-        suit: Suit::Hearts,
-        rank: Rank::Six,
-    },
-    Card {
-        suit: Suit::Hearts,
-        rank: Rank::Seven,
-    },
-    Card {
-        suit: Suit::Hearts,
-        rank: Rank::Eight,
-    },
-    Card {
-        suit: Suit::Hearts,
-        rank: Rank::Nine,
-    },
-    Card {
-        suit: Suit::Hearts,
-        rank: Rank::Ten,
-    },
-    Card {
-        suit: Suit::Hearts,
-        rank: Rank::Jack,
-    },
-    Card {
-        suit: Suit::Hearts,
-        rank: Rank::Queen,
-    },
-    Card {
-        suit: Suit::Hearts,
-        rank: Rank::King,
-    },
-    Card {
-        suit: Suit::Clubs,
-        rank: Rank::Ace,
-    },
-    Card {
-        suit: Suit::Clubs,
-        rank: Rank::Two,
-    },
-    Card {
-        suit: Suit::Clubs,
-        rank: Rank::Three,
-    },
-    Card {
-        suit: Suit::Clubs,
-        rank: Rank::Four,
-    },
-    Card {
-        suit: Suit::Clubs,
-        rank: Rank::Five,
-    },
-    Card {
-        suit: Suit::Clubs,
-        rank: Rank::Six,
-    },
-    Card {
-        suit: Suit::Clubs,
-        rank: Rank::Seven,
-    },
-    Card {
-        suit: Suit::Clubs,
-        rank: Rank::Eight,
-    },
-    Card {
-        suit: Suit::Clubs,
-        rank: Rank::Nine,
-    },
-    Card {
-        suit: Suit::Clubs,
-        rank: Rank::Ten,
-    },
-    Card {
-        suit: Suit::Clubs,
-        rank: Rank::Jack,
-    },
-    Card {
-        suit: Suit::Clubs,
-        rank: Rank::Queen,
-    },
-    Card {
-        suit: Suit::Clubs,
-        rank: Rank::King,
-    },
+const SUITS: [Suit; 4] = [Suit::Spades, Suit::Diamonds, Suit::Hearts, Suit::Clubs];
+const RANKS: [Rank; 13] = [
+    Rank::Two,
+    Rank::Three,
+    Rank::Four,
+    Rank::Five,
+    Rank::Six,
+    Rank::Seven,
+    Rank::Eight,
+    Rank::Nine,
+    Rank::Ten,
+    Rank::Jack,
+    Rank::Queen,
+    Rank::King,
+    Rank::Ace,
 ];
+
+static FULL_DECK: LazyLock<[Card; 52]> = LazyLock::new(|| {
+    let mut deck = [Card {
+        suit: Suit::Spades,
+        rank: Rank::Two,
+    }; 52];
+    let mut i = 0;
+    for &suit in &SUITS {
+        for &rank in &RANKS {
+            deck[i] = Card { suit, rank };
+            i += 1;
+        }
+    }
+    deck
+});
 
 #[derive(PartialEq, Eq, PartialOrd, Ord, Debug, Clone, Copy, Serialize, Deserialize)]
 enum PokerHand {
@@ -685,7 +506,7 @@ impl PokerGame {
         assert!(players.len() <= 10); // max 10 players per game for now
 
         let mut rng = rand::rng();
-        let mut deck = Vec::from(FULL_DECK);
+        let mut deck = Vec::from(*FULL_DECK);
         deck.shuffle(&mut rng);
 
         let mut player_data = Vec::<PlayerData>::with_capacity(players.len());
