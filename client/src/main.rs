@@ -24,12 +24,8 @@ async fn main() -> Result<(), anyhow::Error> {
     // the background while the main loop drives request/response input.
     let notify_conn = connection.clone();
     tokio::spawn(async move {
-        loop {
-            match net::receive_push(&notify_conn).await {
-                Ok(msg) => print_notification(&msg),
-                // The connection closed (or errored); stop listening.
-                Err(_) => break,
-            }
+        while let Ok(msg) = net::receive_push(&notify_conn).await {
+            print_notification(&msg);
         }
     });
 

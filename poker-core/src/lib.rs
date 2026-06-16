@@ -463,11 +463,7 @@ fn evaluate_holdem_hand(cards: &[Card]) -> PokerHand {
                 }
 
                 if let Some(trips) = trips {
-                    return PokerHand::Trips(
-                        trips.into(),
-                        singulars[1].into(),
-                        singulars[0].into(),
-                    );
+                    return PokerHand::Trips(trips, singulars[1], singulars[0]);
                 }
                 PokerHand::TwoPair(pairs[1], pairs[0], singulars[0])
             }
@@ -483,12 +479,7 @@ fn evaluate_holdem_hand(cards: &[Card]) -> PokerHand {
                         singulars.push(rank);
                     }
                 }
-                PokerHand::OnePair(
-                    double.unwrap().into(),
-                    singulars[2].into(),
-                    singulars[1].into(),
-                    singulars[0].into(),
-                )
+                PokerHand::OnePair(double.unwrap(), singulars[2], singulars[1], singulars[0])
             }
             _ => unreachable!(),
         }
@@ -699,15 +690,15 @@ impl PokerGame {
         let mut player_data = Vec::<PlayerData>::with_capacity(players.len());
         let mut player_ids_to_idx_map = HashMap::new();
 
-        for i in 0..players.len() {
+        for (i, player) in players.iter().enumerate() {
             player_data.push(PlayerData {
-                id: players[i],
+                id: *player,
                 hole_cards: vec![deck.pop().unwrap(), deck.pop().unwrap()],
                 bet: 0,
                 folded: false,
                 allin: false,
             });
-            player_ids_to_idx_map.insert(players[i], i);
+            player_ids_to_idx_map.insert(*player, i);
         }
 
         player_data[1].bet = small_blind;
@@ -802,7 +793,7 @@ impl PokerGame {
 
                 // All players folded or all-ined. Skip to showdown
                 self.current_round = PokerRound::Showdown;
-                return true;
+                true
             }
             PokerRound::Flop => {
                 self.current_round = PokerRound::Turn;
@@ -820,7 +811,7 @@ impl PokerGame {
 
                 // All players folded or all-ined. Skip to showdown
                 self.current_round = PokerRound::Showdown;
-                return true;
+                true
             }
             PokerRound::Turn => {
                 self.current_round = PokerRound::River;
@@ -838,11 +829,11 @@ impl PokerGame {
 
                 // All players folded or all-ined. Skip to showdown
                 self.current_round = PokerRound::Showdown;
-                return true;
+                true
             }
             PokerRound::River => {
                 self.current_round = PokerRound::Showdown;
-                return true;
+                true
             }
             PokerRound::Showdown => unreachable!(),
         }
@@ -922,7 +913,7 @@ impl PokerGame {
         // Current betting round finished. Advance to next round
         let showdown_finished = self.advance_round();
 
-        return Ok(showdown_finished);
+        Ok(showdown_finished)
     }
 
     pub fn get_player_ids(&self) -> Vec<PlayerId> {

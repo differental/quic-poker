@@ -165,9 +165,7 @@ impl ServerState {
 
         match curr_table {
             TableState::Lobby(_) => Err(ActionError::Table(TableError::GameNotStarted)),
-            TableState::Game(game) => game
-                .action(player, action)
-                .map_err(|re| ActionError::Rule(re)),
+            TableState::Game(game) => game.action(player, action).map_err(ActionError::Rule),
         }
     }
 
