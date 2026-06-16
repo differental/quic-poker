@@ -2,7 +2,7 @@ use std::io::{self, Write};
 use std::net::{Ipv4Addr, SocketAddr, SocketAddrV4};
 
 use poker_core::Action;
-use protocol::{ClientMessage, TableId};
+use protocol::{ClientMessage, ServerMessage, TableId};
 
 /// Result of parsing a line of user input.
 enum Command {
@@ -20,14 +20,32 @@ async fn main() -> Result<(), anyhow::Error> {
     println!("Connected to {server_addr}.");
     print_help();
 
-    let stdin = io::stdin();
-    let mut line = String::new();
+    // Listen for server-initiated notifications (state updates, turn alerts) in
+    // the background while the main loop drives request/response input.
+    let notify_conn = connection.clone();
+    tokio::spawn(async move {
+        loop {
+            match net::receive_push(&notify_conn).await {
+                Ok(msg) => print_notification(&msg),
+                // The connection closed (or errored); stop listening.
+                Err(_) => break,
+            }
+        }
+    });
+
     loop {
         print!("> ");
         io::stdout().flush()?;
 
-        line.clear();
-        if stdin.read_line(&mut line)? == 0 {
+        // Read a line on the blocking pool so the notification task can keep
+        // printing while we wait for input.
+        let (read, line) = tokio::task::spawn_blocking(|| {
+            let mut line = String::new();
+            io::stdin().read_line(&mut line).map(|read| (read, line))
+        })
+        .await??;
+
+        if read == 0 {
             // EOF (Ctrl-D)
             break;
         }
@@ -56,6 +74,23 @@ async fn main() -> Result<(), anyhow::Error> {
     }
 
     Ok(())
+}
+
+/// Displays a server-initiated notification (a state update or a turn alert),
+/// then restores the input prompt the user was typing at.
+fn print_notification(msg: &ServerMessage) {
+    match msg {
+        ServerMessage::StateUpdate(view) => println!("\n<- state update:\n{view}"),
+        ServerMessage::ItsYourTurn => {
+            println!("\n<- it's your turn! (fold | check | call | raise <to>)")
+        }
+        // Pushes are only ever state/turn notifications, but fall back to the
+        // wire form for anything unexpected.
+        other => println!("\n<- {}", protocol::encode(other)),
+    }
+
+    print!("> ");
+    let _ = io::stdout().flush();
 }
 
 /// Parses a single line of input into a [`Command`].

@@ -559,6 +559,68 @@ pub enum RuleError {
     ExceedTableMax,
 }
 
+impl fmt::Display for PokerRound {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let name = match self {
+            PokerRound::PreFlop => "pre-flop",
+            PokerRound::Flop => "flop",
+            PokerRound::Turn => "turn",
+            PokerRound::River => "river",
+            PokerRound::Showdown => "showdown",
+        };
+        write!(f, "{name}")
+    }
+}
+
+impl fmt::Display for PokerGameView {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        writeln!(
+            f,
+            "round: {} | table bet: {} | your bet: {}",
+            self.current_round, self.current_bet, self.player_current_bet
+        )?;
+
+        write!(f, "board:")?;
+        if self.drawn_community_cards.is_empty() {
+            write!(f, " (none)")?;
+        } else {
+            for card in &self.drawn_community_cards {
+                write!(f, " {card}")?;
+            }
+        }
+        writeln!(f)?;
+
+        write!(f, "hand:")?;
+        for card in &self.hole_cards {
+            write!(f, " {card}")?;
+        }
+        writeln!(f)?;
+
+        writeln!(f, "players:")?;
+        for (idx, player) in self.player_view.iter().enumerate() {
+            let to_act = if idx == self.player_to_action_idx {
+                " <- to act"
+            } else {
+                ""
+            };
+            let status = if player.folded {
+                " (folded)"
+            } else if player.allin {
+                " (all-in)"
+            } else {
+                ""
+            };
+            writeln!(
+                f,
+                "  player {}: bet {}{}{}",
+                player.id.0, player.bet, status, to_act
+            )?;
+        }
+
+        Ok(())
+    }
+}
+
 impl PokerGame {
     pub fn new(players: &[PlayerId], small_blind: u64, big_blind: u64, table_max_bet: u64) -> Self {
         // Start new poker game
