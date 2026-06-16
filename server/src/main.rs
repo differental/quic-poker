@@ -166,6 +166,11 @@ impl ServerState {
             TableState::Lobby(_) => Err(ActionError::Table(TableError::GameNotStarted)),
             TableState::Game(game) => game
                 .action(player, action)
+                .map(|x| {
+                    if x {
+                        self.end_game(table);
+                    }
+                })
                 .map_err(|re| ActionError::Rule(re)),
         }
     }
@@ -190,6 +195,37 @@ impl ServerState {
                         net::push(conn, &ServerMessage::ItsYourTurn).await?;
                     }
                 }
+            }
+        }
+
+        Ok(())
+    }
+
+    pub async fn end_game(&mut self, table: TableId) -> Result<(), anyhow::Error> {
+        // Showdown, send showdown messages, eject all players, return to lobby
+        let curr_table = self.tables.get_mut(&table).unwrap();
+
+        match curr_table {
+            TableState::Lobby(_) => {
+                panic!("Cannot showdown in a lobby!")
+            }
+            TableState::Game(game) => {
+                let players = game.get_player_ids();
+
+                let showdown_result = game.get_showdown_results();
+
+                for player_id in players {
+                    let conn = &self.connections[&player_id];
+                    net::push(conn, &ServerMessage::GameOver(showdown_result.clone())).await?;
+                }
+
+                // Reset table to lobby, keeping all players and settings
+                *curr_table = TableState::Lobby(Lobby {
+                    players: game.get_player_ids(),
+                    table_max_bet: game.table_max_bet,
+                    big_blind: game.big_blind,
+                    small_blind: game.small_blind,
+                });
             }
         }
 
@@ -284,11 +320,9 @@ async fn main() -> Result<(), anyhow::Error> {
                             Some(player_id) => {
                                 match state.execute_poker_action(player_id, action) {
                                     Ok(()) => {
-                                        // Notify entire table
+                                        // Notify entire table (and next player)
                                         let table_id = state.player_id_to_table_map[&player_id];
                                         let _ = state.notify_table(table_id).await; // Update fails silently
-
-                                        // Notify next player
 
                                         ServerMessage::ActionAccepted
                                     }

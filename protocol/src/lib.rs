@@ -1,4 +1,4 @@
-use poker_core::{Action, PlayerId, PokerGameView, RuleError};
+use poker_core::{Action, PlayerId, PokerGameResult, PokerGameView, RuleError};
 use serde::{Deserialize, Serialize};
 
 #[derive(Clone, Copy, Serialize, Deserialize)]
@@ -32,6 +32,7 @@ pub enum ServerMessage {
     ItsYourTurn,
     ActionAccepted,
     ActionRejected(ActionError),
+    GameOver(PokerGameResult),
 }
 
 #[derive(Clone, Copy, Eq, Hash, PartialEq, Serialize, Deserialize)]

@@ -328,7 +328,7 @@ const FULL_DECK: [Card; 52] = [
     },
 ];
 
-#[derive(PartialEq, Eq, PartialOrd, Ord, Debug, Serialize, Deserialize)]
+#[derive(PartialEq, Eq, PartialOrd, Ord, Debug, Clone, Copy, Serialize, Deserialize)]
 enum PokerHand {
     HighCard(Rank, Rank, Rank, Rank, Rank),
     OnePair(Rank, Rank, Rank, Rank), // (pair, ...)
@@ -508,7 +508,7 @@ struct PlayerData {
     allin: bool,
 }
 
-#[derive(Clone, Copy, Debug, Serialize, Deserialize)]
+#[derive(Clone, Copy, Debug, Serialize, Deserialize, PartialEq, Eq)]
 enum PokerRound {
     PreFlop,
     Flop,
@@ -523,9 +523,9 @@ pub struct PokerGame {
     current_bet: u64,
     community_cards: Vec<Card>,
     player_data: Vec<PlayerData>,
-    table_max_bet: u64,
-    big_blind: u64,
-    small_blind: u64,
+    pub table_max_bet: u64,
+    pub big_blind: u64,
+    pub small_blind: u64,
     player_to_action_idx: usize,
     last_raise_player_idx: usize,
     player_ids_to_idx_map: HashMap<PlayerId, usize>,
@@ -557,6 +557,14 @@ pub enum RuleError {
     CallOnNoBet,
     BelowMinRaise,
     ExceedTableMax,
+}
+
+#[derive(Clone, Serialize, Deserialize)]
+pub struct PokerGameResult {
+    winners: Vec<PlayerId>,
+    total_pot: u64,
+    community_cards: Vec<Card>,
+    player_hands: Vec<(PlayerId, Vec<Card>, PokerHand)>,
 }
 
 impl fmt::Display for PokerRound {
@@ -674,12 +682,52 @@ impl PokerGame {
         }
     }
 
-    fn showdown(&self) {
-        // Do showdown stuff
+    pub fn get_showdown_results(&self) -> PokerGameResult {
+        // Can only be called on a showdown-round game.
+        assert_eq!(self.current_round, PokerRound::Showdown);
+
+        // Calculate player hands and sort (id, card, hand) in decreasing order of hand
+        let player_hands: Vec<(PlayerId, Vec<Card>, PokerHand)> = self
+            .player_data
+            .iter()
+            .map(|x| {
+                (
+                    x.id,
+                    x.hole_cards.clone(),
+                    self.community_cards
+                        .iter()
+                        .chain(&x.hole_cards)
+                        .cloned()
+                        .collect::<Vec<Card>>(),
+                )
+            })
+            .map(|(id, hole_cards, all_cards)| (id, hole_cards, evaluate_holdem_hand(&all_cards)))
+            .sorted_by(|x, y| Ord::cmp(&x.1, &y.1).reverse())
+            .collect();
+
+        let total_pot: u64 = self.player_data.iter().map(|x| x.bet).sum();
+
+        let mut winners = vec![player_hands[0].0];
+
+        for i in 1..player_hands.len() {
+            if player_hands[i].2 == player_hands[0].2 {
+                winners.push(player_hands[i].0);
+            } else {
+                break;
+            }
+        }
+
+        PokerGameResult {
+            winners,
+            total_pot,
+            community_cards: self.community_cards.clone(),
+            player_hands,
+        }
     }
 
-    fn advance_round(&mut self) {
+    fn advance_round(&mut self) -> bool {
         // Advance to next round. Executes showdown if called on a river-round game.
+        // Returns if we've completed showdown. true if we have.
         match self.current_round {
             PokerRound::PreFlop => {
                 self.current_round = PokerRound::Flop;
@@ -691,13 +739,13 @@ impl PokerGame {
                     if !player.folded && !player.allin {
                         // Found next player
                         self.player_to_action_idx = idx;
-                        return;
+                        return false;
                     }
                 }
 
                 // All players folded or all-ined. Skip to showdown
                 self.current_round = PokerRound::Showdown;
-                self.showdown();
+                return true;
             }
             PokerRound::Flop => {
                 self.current_round = PokerRound::Turn;
@@ -709,13 +757,13 @@ impl PokerGame {
                     if !player.folded && !player.allin {
                         // Found next player
                         self.player_to_action_idx = idx;
-                        return;
+                        return false;
                     }
                 }
 
                 // All players folded or all-ined. Skip to showdown
                 self.current_round = PokerRound::Showdown;
-                self.showdown();
+                return true;
             }
             PokerRound::Turn => {
                 self.current_round = PokerRound::River;
@@ -727,23 +775,24 @@ impl PokerGame {
                     if !player.folded && !player.allin {
                         // Found next player
                         self.player_to_action_idx = idx;
-                        return;
+                        return false;
                     }
                 }
 
                 // All players folded or all-ined. Skip to showdown
                 self.current_round = PokerRound::Showdown;
-                self.showdown();
+                return true;
             }
             PokerRound::River => {
                 self.current_round = PokerRound::Showdown;
-                self.showdown();
+                return true;
             }
             PokerRound::Showdown => unreachable!(),
         }
     }
 
-    pub fn action(&mut self, player_id: PlayerId, action: Action) -> Result<(), RuleError> {
+    pub fn action(&mut self, player_id: PlayerId, action: Action) -> Result<bool, RuleError> {
+        // Returns Ok(bool) signalling if the game is over (true if it's over).
         let curr_player = &mut self.player_data[self.player_to_action_idx];
 
         if player_id != curr_player.id {
@@ -769,6 +818,11 @@ impl PokerGame {
                 }
                 // Call: Set new bet
                 curr_player.bet = self.current_bet;
+
+                // If calling a max bet, it's also an all-in
+                if self.current_bet == self.table_max_bet {
+                    curr_player.allin = true;
+                }
             }
             Action::Raise { to: new_bet } => {
                 // Raise only legal if new_bet larger than current bet
@@ -802,16 +856,16 @@ impl PokerGame {
             if !player.folded && !player.allin {
                 // Found next player
                 self.player_to_action_idx = idx;
-                return Ok(());
+                return Ok(false);
             }
 
             idx = (idx + 1) % self.player_data.len();
         }
 
         // Current betting round finished. Advance to next round
-        self.advance_round();
+        let showdown_finished = self.advance_round();
 
-        return Ok(());
+        return Ok(showdown_finished);
     }
 
     pub fn get_player_ids(&self) -> Vec<PlayerId> {
