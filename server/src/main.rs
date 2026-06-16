@@ -155,7 +155,8 @@ impl ServerState {
         &mut self,
         player: PlayerId,
         action: Action,
-    ) -> Result<(), ActionError> {
+    ) -> Result<bool, ActionError> {
+        // Returns Ok(bool) if no errors, where bool indicates if game has completed
         if !self.player_id_to_table_map.contains_key(&player) {
             return Err(ActionError::Table(TableError::NotInTable));
         }
@@ -164,14 +165,9 @@ impl ServerState {
 
         match curr_table {
             TableState::Lobby(_) => Err(ActionError::Table(TableError::GameNotStarted)),
-            TableState::Game(game) => game
-                .action(player, action)
-                .map(|x| {
-                    if x {
-                        self.end_game(table);
-                    }
-                })
-                .map_err(|re| ActionError::Rule(re)),
+            TableState::Game(game) => {
+                game.action(player, action).map_err(|re| ActionError::Rule(re))
+            }
         }
     }
 
@@ -319,10 +315,15 @@ async fn main() -> Result<(), anyhow::Error> {
                         match state.lookup_player(&connection) {
                             Some(player_id) => {
                                 match state.execute_poker_action(player_id, action) {
-                                    Ok(()) => {
-                                        // Notify entire table (and next player)
+                                    Ok(game_over) => {
                                         let table_id = state.player_id_to_table_map[&player_id];
-                                        let _ = state.notify_table(table_id).await; // Update fails silently
+                                        if game_over {
+                                            // Hand finished: Notify showdown results to entire table
+                                            let _ = state.end_game(table_id).await;
+                                        } else {
+                                            // Notify entire table (and next player)
+                                            let _ = state.notify_table(table_id).await; // Update fails silently
+                                        }
 
                                         ServerMessage::ActionAccepted
                                     }
