@@ -75,7 +75,7 @@ pub async fn request(conn: &Connection, msg: &ClientMessage) -> Result<ServerMes
     let encoded_bytes = encoded.into_bytes();
 
     send.write_all(&encoded_bytes).await?;
-    send.finish().unwrap();
+    send.finish()?;
 
     let received = recv.read_to_end(5120).await?;
     let received_str = String::from_utf8(received).unwrap();
@@ -89,7 +89,7 @@ pub async fn reply(send: &mut SendStream, msg: &ServerMessage) -> Result<(), Net
     let encoded_bytes = encoded.into_bytes();
 
     send.write_all(&encoded_bytes).await?;
-    send.finish().unwrap();
+    send.finish()?;
 
     Ok(())
 }
@@ -101,7 +101,7 @@ pub async fn push(conn: &Connection, msg: &ServerMessage) -> Result<(), NetError
     let encoded_bytes = encoded.into_bytes();
 
     send.write_all(&encoded_bytes).await?;
-    send.finish().unwrap();
+    send.finish()?;
 
     Ok(())
 }

@@ -572,7 +572,7 @@ pub struct PokerGameResult {
     winners: Vec<PlayerId>,
     total_pot: u64,
     community_cards: Vec<Card>,
-    player_hands: Vec<(PlayerId, Vec<Card>, PokerHand)>,
+    player_hands: Vec<(PlayerId, Vec<Card>, bool, PokerHand)>,
 }
 
 impl fmt::Display for PokerRound {
@@ -664,13 +664,14 @@ impl fmt::Display for PokerGameResult {
 
         // player_hands is sorted strongest first, so this reads as a ranking.
         writeln!(f, "hands (best first):")?;
-        for (id, hole_cards, hand) in &self.player_hands {
+        for (id, hole_cards, folded, hand) in &self.player_hands {
             let marker = if self.winners.contains(id) { " *" } else { "" };
+            let folded_marker = if *folded { " (folded)" } else { "" };
             write!(f, "  player {}:", id.0)?;
             for card in hole_cards {
                 write!(f, " {card}")?;
             }
-            writeln!(f, " - {hand}{marker}")?;
+            writeln!(f, " - {hand}{folded_marker}{marker}")?;
         }
 
         Ok(())
@@ -734,14 +735,15 @@ impl PokerGame {
         // Can only be called on a showdown-round game.
         assert_eq!(self.current_round, PokerRound::Showdown);
 
-        // Calculate player hands and sort (id, card, hand) in decreasing order of hand
-        let player_hands: Vec<(PlayerId, Vec<Card>, PokerHand)> = self
+        // Calculate player hands and sort (id, card, folded, hand) in decreasing order of hand
+        let player_hands: Vec<(PlayerId, Vec<Card>, bool, PokerHand)> = self
             .player_data
             .iter()
             .map(|x| {
                 (
                     x.id,
                     x.hole_cards.clone(),
+                    x.folded,
                     self.community_cards
                         .iter()
                         .chain(&x.hole_cards)
@@ -749,8 +751,8 @@ impl PokerGame {
                         .collect::<Vec<Card>>(),
                 )
             })
-            .map(|(id, hole_cards, all_cards)| (id, hole_cards, evaluate_holdem_hand(&all_cards)))
-            .sorted_by(|x, y| Ord::cmp(&x.2, &y.2).reverse())
+            .map(|(id, hole_cards, folded, all_cards)| (id, hole_cards, folded, evaluate_holdem_hand(&all_cards)))
+            .sorted_by(|x, y| Ord::cmp(&x.2, &y.2).then(Ord::cmp(&x.3, &y.3).reverse()))
             .collect();
 
         let total_pot: u64 = self.player_data.iter().map(|x| x.bet).sum();
@@ -758,7 +760,7 @@ impl PokerGame {
         let mut winners = vec![player_hands[0].0];
 
         for i in 1..player_hands.len() {
-            if player_hands[i].2 == player_hands[0].2 {
+            if player_hands[i].3 == player_hands[0].3 && !player_hands[i].2 {
                 winners.push(player_hands[i].0);
             } else {
                 break;

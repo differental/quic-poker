@@ -6,6 +6,7 @@ pub enum NetError {
     Connection(quinn::ConnectionError),
     Write(quinn::WriteError),
     Read(quinn::ReadToEndError),
+    ClosedStream(quinn::ClosedStream),
     Rustls(rustls::Error),
     Cipher(NoInitialCipherSuite),
     #[cfg(feature = "dev")]
@@ -36,6 +37,12 @@ impl From<quinn::WriteError> for NetError {
 impl From<quinn::ReadToEndError> for NetError {
     fn from(value: quinn::ReadToEndError) -> Self {
         NetError::Read(value)
+    }
+}
+
+impl From<quinn::ClosedStream> for NetError {
+    fn from(value: quinn::ClosedStream) -> Self {
+        NetError::ClosedStream(value)
     }
 }
 
@@ -71,6 +78,7 @@ impl std::fmt::Display for NetError {
             NetError::Connection(e) => write!(f, "connection error: {e}"),
             NetError::Write(e) => write!(f, "failed to write to stream: {e}"),
             NetError::Read(e) => write!(f, "failed to read from stream: {e}"),
+            NetError::ClosedStream(e) => write!(f, "stream closed: {e}"),
             NetError::Rustls(e) => write!(f, "TLS error: {e}"),
             NetError::Cipher(e) => write!(f, "invalid initial cipher suite: {e}"),
             #[cfg(feature = "dev")]
@@ -89,6 +97,7 @@ impl std::error::Error for NetError {
             NetError::Connection(e) => Some(e),
             NetError::Write(e) => Some(e),
             NetError::Read(e) => Some(e),
+            NetError::ClosedStream(e) => Some(e),
             NetError::Rustls(e) => Some(e),
             NetError::Cipher(e) => Some(e),
             #[cfg(feature = "dev")]
