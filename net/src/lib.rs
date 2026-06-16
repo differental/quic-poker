@@ -52,7 +52,7 @@ pub fn make_server_endpoint(
 }
 
 pub fn make_client_endpoint() -> Result<Endpoint, NetError> {
-    let client_addr = SocketAddr::V4(SocketAddrV4::new(Ipv4Addr::LOCALHOST, 0));
+    let client_addr = SocketAddr::V4(SocketAddrV4::new(Ipv4Addr::UNSPECIFIED, 0));
     let mut endpoint = Endpoint::client(client_addr)?;
     let mut client_config = configure_client()?;
     client_config.transport_config(Arc::new(transport_config()));

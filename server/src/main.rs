@@ -253,7 +253,7 @@ async fn main() -> Result<(), anyhow::Error> {
         .parse()
         .expect("SERVER_PORT must be an integer");
 
-    let server_addr: SocketAddr = SocketAddr::V4(SocketAddrV4::new(Ipv4Addr::BROADCAST, port));
+    let server_addr: SocketAddr = SocketAddr::V4(SocketAddrV4::new(Ipv4Addr::UNSPECIFIED, port));
 
     let endpoint = net::make_server_endpoint(server_addr, cert, key)?;
 
