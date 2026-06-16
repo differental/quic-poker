@@ -1,5 +1,6 @@
 use poker_core::{Action, PlayerId, PokerGameResult, PokerGameView, RuleError};
 use serde::{Deserialize, Serialize};
+pub use serde_json::Error as SerdeError;
 
 #[derive(Clone, Copy, Serialize, Deserialize)]
 pub enum TableError {
@@ -48,10 +49,10 @@ pub enum ClientMessage {
     Action(Action),
 }
 
-pub fn encode<T: Serialize>(message: &T) -> String {
-    serde_json::to_string(message).unwrap()
+pub fn encode<T: Serialize>(message: &T) -> Result<String, serde_json::Error> {
+    serde_json::to_string(message)
 }
 
-pub fn decode<'a, T: Deserialize<'a>>(message: &'a str) -> T {
-    serde_json::from_str(message).unwrap()
+pub fn decode<'a, T: Deserialize<'a>>(message: &'a str) -> Result<T, serde_json::Error> {
+    serde_json::from_str(message)
 }

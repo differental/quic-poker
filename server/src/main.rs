@@ -260,7 +260,8 @@ async fn main() -> Result<(), anyhow::Error> {
                     .await
                     .expect("Error in receiving message");
                 let client_msg: ClientMessage =
-                    protocol::decode(&String::from_utf8(recv_bytes).unwrap());
+                    protocol::decode(&String::from_utf8(recv_bytes).unwrap())
+                        .expect("Error in decoding message");
                 let msg: ServerMessage = match client_msg {
                     ClientMessage::Hello => {
                         let mut state = state.lock().await;

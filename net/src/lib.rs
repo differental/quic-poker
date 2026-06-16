@@ -71,7 +71,7 @@ pub async fn connect_to_server(
 pub async fn request(conn: &Connection, msg: &ClientMessage) -> Result<ServerMessage, NetError> {
     // Client encodes a message and sends a request (e.g., join table, or poker action) to server, await server response, then decode the response.
     let (mut send, mut recv) = conn.open_bi().await?;
-    let encoded = protocol::encode(msg);
+    let encoded = protocol::encode(msg)?;
     let encoded_bytes = encoded.into_bytes();
 
     send.write_all(&encoded_bytes).await?;
@@ -80,12 +80,12 @@ pub async fn request(conn: &Connection, msg: &ClientMessage) -> Result<ServerMes
     let received = recv.read_to_end(5120).await?;
     let received_str = String::from_utf8(received).unwrap();
 
-    Ok(protocol::decode(&received_str))
+    Ok(protocol::decode(&received_str)?)
 }
 
 pub async fn reply(send: &mut SendStream, msg: &ServerMessage) -> Result<(), NetError> {
     // Server encodes a message and uses the end stream to send it to client.
-    let encoded = protocol::encode(msg);
+    let encoded = protocol::encode(msg)?;
     let encoded_bytes = encoded.into_bytes();
 
     send.write_all(&encoded_bytes).await?;
@@ -97,7 +97,7 @@ pub async fn reply(send: &mut SendStream, msg: &ServerMessage) -> Result<(), Net
 pub async fn push(conn: &Connection, msg: &ServerMessage) -> Result<(), NetError> {
     // Server pushes a unidirectional message to client.
     let mut send = conn.open_uni().await?;
-    let encoded = protocol::encode(msg);
+    let encoded = protocol::encode(msg)?;
     let encoded_bytes = encoded.into_bytes();
 
     send.write_all(&encoded_bytes).await?;
@@ -113,5 +113,5 @@ pub async fn receive_push(conn: &Connection) -> Result<ServerMessage, NetError> 
     let received = recv.read_to_end(5120).await?;
     let received_str = String::from_utf8(received).unwrap();
 
-    Ok(protocol::decode(&received_str))
+    Ok(protocol::decode(&received_str)?)
 }

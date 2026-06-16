@@ -751,7 +751,9 @@ impl PokerGame {
                         .collect::<Vec<Card>>(),
                 )
             })
-            .map(|(id, hole_cards, folded, all_cards)| (id, hole_cards, folded, evaluate_holdem_hand(&all_cards)))
+            .map(|(id, hole_cards, folded, all_cards)| {
+                (id, hole_cards, folded, evaluate_holdem_hand(&all_cards))
+            })
             .sorted_by(|x, y| Ord::cmp(&x.2, &y.2).then(Ord::cmp(&x.3, &y.3).reverse()))
             .collect();
 

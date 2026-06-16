@@ -1,3 +1,4 @@
+use protocol::SerdeError;
 use quinn::crypto::rustls::NoInitialCipherSuite;
 
 #[derive(Debug)]
@@ -12,8 +13,7 @@ pub enum NetError {
     #[cfg(feature = "dev")]
     RcGen(rcgen::Error),
     Io(std::io::Error),
-    Decode(/* protocol's error type */),
-    Config(/* rustls / endpoint setup error */),
+    Serde(SerdeError),
 }
 
 impl From<quinn::ConnectError> for NetError {
@@ -71,6 +71,12 @@ impl From<std::io::Error> for NetError {
     }
 }
 
+impl From<SerdeError> for NetError {
+    fn from(value: SerdeError) -> Self {
+        NetError::Serde(value)
+    }
+}
+
 impl std::fmt::Display for NetError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
@@ -84,8 +90,7 @@ impl std::fmt::Display for NetError {
             #[cfg(feature = "dev")]
             NetError::RcGen(e) => write!(f, "certificate generation error: {e}"),
             NetError::Io(e) => write!(f, "I/O error: {e}"),
-            NetError::Decode() => write!(f, "failed to decode message"),
-            NetError::Config() => write!(f, "endpoint configuration error"),
+            NetError::Serde(e) => write!(f, "encode/decode error: {e}"),
         }
     }
 }
@@ -103,7 +108,7 @@ impl std::error::Error for NetError {
             #[cfg(feature = "dev")]
             NetError::RcGen(e) => Some(e),
             NetError::Io(e) => Some(e),
-            NetError::Decode() | NetError::Config() => None,
+            NetError::Serde(e) => Some(e),
         }
     }
 }
