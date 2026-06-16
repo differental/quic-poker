@@ -307,7 +307,11 @@ async fn main() -> Result<(), anyhow::Error> {
                         let mut state = state.lock().await;
                         match state.lookup_player(&connection) {
                             Some(player_id) => match state.start_game(player_id) {
-                                Ok(()) => ServerMessage::TableConfigureSuccess,
+                                Ok(()) => {
+                                    let table_id = state.player_id_to_table_map[&player_id];
+                                    let _ = state.notify_table(table_id).await;
+                                    ServerMessage::TableConfigureSuccess
+                                },
                                 Err(err) => ServerMessage::TableConfigureFailed(err),
                             },
                             None => ServerMessage::TableJoinFailed(TableError::PlayerNotFound),
