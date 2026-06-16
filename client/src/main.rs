@@ -1,5 +1,5 @@
 use std::io::{self, Write};
-use std::net::{Ipv4Addr, SocketAddr, SocketAddrV4};
+use std::net::SocketAddr;
 
 use poker_core::Action;
 use protocol::{ClientMessage, ServerMessage, TableId};
@@ -13,8 +13,9 @@ enum Command {
 
 #[tokio::main]
 async fn main() -> Result<(), anyhow::Error> {
+    let server_addr = parse_server_addr()?;
+
     let endpoint = net::make_client_endpoint()?;
-    let server_addr = SocketAddr::V4(SocketAddrV4::new(Ipv4Addr::LOCALHOST, 5000));
     let connection = net::connect_to_server(&endpoint, server_addr, "localhost").await?;
 
     println!("Connected to {server_addr}.");
@@ -70,6 +71,17 @@ async fn main() -> Result<(), anyhow::Error> {
     }
 
     Ok(())
+}
+
+/// Reads the server address from the first CLI argument, e.g.
+/// `client 127.0.0.1:5000`. Defaults to `127.0.0.1:5000` when omitted.
+fn parse_server_addr() -> Result<SocketAddr, anyhow::Error> {
+    match std::env::args().nth(1) {
+        Some(arg) => arg
+            .parse()
+            .map_err(|e| anyhow::anyhow!("invalid server address `{arg}`: {e}")),
+        None => Ok(SocketAddr::from(([127, 0, 0, 1], 5000))),
+    }
 }
 
 /// Displays a server-initiated notification (a state update or a turn alert),
