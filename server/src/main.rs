@@ -246,7 +246,8 @@ async fn main() -> Result<(), anyhow::Error> {
     #[cfg(feature = "dev")]
     let (cert_chain, key) = net::cert::dev::generate_self_signed_cert()?;
     #[cfg(not(feature = "dev"))]
-    let (cert_chain, key) = net::cert::prod::load_certs_from_file(&*FULLCHAIN_PATH, &*PRIVKEY_PATH)?;
+    let (cert_chain, key) =
+        net::cert::prod::load_certs_from_file(&*FULLCHAIN_PATH, &*PRIVKEY_PATH)?;
 
     let port: u16 = env::var("SERVER_PORT")
         .expect("SERVER_PORT must be set")

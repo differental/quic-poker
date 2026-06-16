@@ -85,10 +85,13 @@ async fn parse_server_addr() -> Result<(SocketAddr, String), anyhow::Error> {
     let (host, _port) = arg
         .rsplit_once(':')
         .ok_or_else(|| anyhow::anyhow!("invalid server address `{arg}`: expected `host:port`"))?;
-    
+
     // Strip the brackets from an IPv6 literal (`[::1]:5000`) so the SNI name is
     // the bare host.
-    let host = host.trim_start_matches('[').trim_end_matches(']').to_string();
+    let host = host
+        .trim_start_matches('[')
+        .trim_end_matches(']')
+        .to_string();
 
     // DNS resolution
     let addr = tokio::net::lookup_host(arg.as_str())
