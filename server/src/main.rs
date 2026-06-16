@@ -165,9 +165,9 @@ impl ServerState {
 
         match curr_table {
             TableState::Lobby(_) => Err(ActionError::Table(TableError::GameNotStarted)),
-            TableState::Game(game) => {
-                game.action(player, action).map_err(|re| ActionError::Rule(re))
-            }
+            TableState::Game(game) => game
+                .action(player, action)
+                .map_err(|re| ActionError::Rule(re)),
         }
     }
 
@@ -335,7 +335,9 @@ async fn main() -> Result<(), anyhow::Error> {
                     }
                 };
 
-                net::reply(send, &msg).await.expect("Error in replying");
+                net::reply(&mut send, &msg)
+                    .await
+                    .expect("Error in replying");
             }
         });
     }
