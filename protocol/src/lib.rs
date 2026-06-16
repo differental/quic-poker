@@ -12,6 +12,7 @@ pub enum TableError {
     NotInTable,
     TooFewPlayers,
     TooManyPlayers,
+    InvalidTableConfig,
 }
 
 #[derive(Clone, Copy, Serialize, Deserialize)]

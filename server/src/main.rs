@@ -107,6 +107,10 @@ impl ServerState {
         if !self.player_id_to_table_map.contains_key(&player) {
             return Err(TableError::NotInTable);
         }
+        if big_blind < small_blind || big_blind > table_max_bet {
+            return Err(TableError::InvalidTableConfig);
+        }
+
         let table = self.player_id_to_table_map[&player];
         let curr_table = self.tables.get_mut(&table).unwrap();
 
