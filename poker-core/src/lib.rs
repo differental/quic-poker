@@ -759,7 +759,7 @@ impl PokerGame {
                 )
             })
             .map(|(id, hole_cards, all_cards)| (id, hole_cards, evaluate_holdem_hand(&all_cards)))
-            .sorted_by(|x, y| Ord::cmp(&x.1, &y.1).reverse())
+            .sorted_by(|x, y| Ord::cmp(&x.2, &y.2).reverse())
             .collect();
 
         let total_pot: u64 = self.player_data.iter().map(|x| x.bet).sum();
