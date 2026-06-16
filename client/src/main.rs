@@ -84,8 +84,9 @@ fn print_notification(msg: &ServerMessage) {
         ServerMessage::ItsYourTurn => {
             println!("\n<- it's your turn! (fold | check | call | raise <to>)")
         }
-        // Pushes are only ever state/turn notifications, but fall back to the
-        // wire form for anything unexpected.
+        ServerMessage::GameOver(result) => println!("\n<- game over:\n{result}"),
+        // Pushes are only ever state/turn/game-over notifications, but fall back
+        // to the wire form for anything unexpected.
         other => println!("\n<- {}", protocol::encode(other)),
     }
 

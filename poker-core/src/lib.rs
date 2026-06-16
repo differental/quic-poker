@@ -342,6 +342,23 @@ enum PokerHand {
     RoyalFlush,
 }
 
+impl fmt::Display for PokerHand {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            PokerHand::HighCard(hi, ..) => write!(f, "high card, {hi} high"),
+            PokerHand::OnePair(pair, ..) => write!(f, "pair of {pair}s"),
+            PokerHand::TwoPair(hi, lo, _) => write!(f, "two pair, {hi}s and {lo}s"),
+            PokerHand::Trips(trips, ..) => write!(f, "three of a kind, {trips}s"),
+            PokerHand::Straight(hi) => write!(f, "straight, {hi} high"),
+            PokerHand::Flush(hi, ..) => write!(f, "flush, {hi} high"),
+            PokerHand::FullHouse(trips, pair) => write!(f, "full house, {trips}s full of {pair}s"),
+            PokerHand::Quads(quads, _) => write!(f, "four of a kind, {quads}s"),
+            PokerHand::StraightFlush(hi) => write!(f, "straight flush, {hi} high"),
+            PokerHand::RoyalFlush => write!(f, "royal flush"),
+        }
+    }
+}
+
 fn evaluate_holdem_hand(cards: &[Card]) -> PokerHand {
     assert!(cards.len() >= 5);
 
@@ -623,6 +640,46 @@ impl fmt::Display for PokerGameView {
                 "  player {}: bet {}{}{}",
                 player.id.0, player.bet, status, to_act
             )?;
+        }
+
+        Ok(())
+    }
+}
+
+impl fmt::Display for PokerGameResult {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "board:")?;
+        if self.community_cards.is_empty() {
+            write!(f, " (none)")?;
+        } else {
+            for card in &self.community_cards {
+                write!(f, " {card}")?;
+            }
+        }
+        writeln!(f)?;
+
+        writeln!(f, "pot: {}", self.total_pot)?;
+
+        let label = if self.winners.len() > 1 {
+            "winners:"
+        } else {
+            "winner:"
+        };
+        write!(f, "{label}")?;
+        for id in &self.winners {
+            write!(f, " player {}", id.0)?;
+        }
+        writeln!(f)?;
+
+        // player_hands is sorted strongest first, so this reads as a ranking.
+        writeln!(f, "hands (best first):")?;
+        for (id, hole_cards, hand) in &self.player_hands {
+            let marker = if self.winners.contains(id) { " *" } else { "" };
+            write!(f, "  player {}:", id.0)?;
+            for card in hole_cards {
+                write!(f, " {card}")?;
+            }
+            writeln!(f, " - {hand}{marker}")?;
         }
 
         Ok(())
