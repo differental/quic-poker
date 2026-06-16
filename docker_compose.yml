@@ -1,5 +1,7 @@
 services:
   quic-server:
+    user: "0:0"
+
     build:
       context: .
       dockerfile: Dockerfile
