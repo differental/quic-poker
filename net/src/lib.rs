@@ -43,10 +43,10 @@ fn transport_config() -> TransportConfig {
 
 pub fn make_server_endpoint(
     addr: SocketAddr,
-    cert: CertificateDer<'static>,
+    cert_chain: Vec<CertificateDer<'static>>,
     key: PrivatePkcs8KeyDer<'static>,
 ) -> Result<Endpoint, NetError> {
-    let mut config = configure_server(cert, key)?;
+    let mut config = configure_server(cert_chain, key)?;
     config.transport_config(Arc::new(transport_config()));
     Ok(Endpoint::server(config, addr)?)
 }

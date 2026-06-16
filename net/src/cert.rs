@@ -6,7 +6,7 @@ use rustls::pki_types::{CertificateDer, PrivateKeyDer, PrivatePkcs8KeyDer};
 use crate::error::NetError;
 
 pub fn configure_server(
-    cert: CertificateDer<'static>,
+    cert_chain: Vec<CertificateDer<'static>>,
     key: PrivatePkcs8KeyDer<'static>,
 ) -> Result<ServerConfig, NetError> {
     let crypto = rustls::ServerConfig::builder_with_provider(Arc::new(
@@ -14,7 +14,7 @@ pub fn configure_server(
     ))
     .with_safe_default_protocol_versions()?
     .with_no_client_auth()
-    .with_single_cert(vec![cert], PrivateKeyDer::from(key))?;
+    .with_single_cert(cert_chain, PrivateKeyDer::from(key))?;
 
     Ok(ServerConfig::with_crypto(Arc::new(
         QuicServerConfig::try_from(crypto)?,
@@ -90,11 +90,11 @@ pub mod dev {
     }
 
     pub fn generate_self_signed_cert()
-    -> Result<(CertificateDer<'static>, PrivatePkcs8KeyDer<'static>), NetError> {
+    -> Result<(Vec<CertificateDer<'static>>, PrivatePkcs8KeyDer<'static>), NetError> {
         let cert = rcgen::generate_simple_self_signed(vec!["localhost".to_string()])?;
         let cert_der = CertificateDer::from(cert.cert);
         let key = PrivatePkcs8KeyDer::from(cert.signing_key.serialize_der());
-        Ok((cert_der, key))
+        Ok((vec![cert_der], key))
     }
 
     pub fn configure_client() -> Result<ClientConfig, NetError> {
@@ -147,17 +147,18 @@ pub mod prod {
     pub fn load_certs_from_file(
         cert_path: impl AsRef<Path>,
         key_path: impl AsRef<Path>,
-    ) -> Result<(CertificateDer<'static>, PrivatePkcs8KeyDer<'static>), NetError> {
+    ) -> Result<(Vec<CertificateDer<'static>>, PrivatePkcs8KeyDer<'static>), NetError> {
         let mut cert_reader = BufReader::new(File::open(cert_path)?);
-        let cert = rustls_pemfile::certs(&mut cert_reader)
-            .next()
-            .ok_or_else(|| io::Error::new(io::ErrorKind::InvalidData, "no certificate found"))??;
+        let cert_chain = rustls_pemfile::certs(&mut cert_reader).collect::<Result<Vec<_>, _>>()?;
+        if cert_chain.is_empty() {
+            return Err(io::Error::new(io::ErrorKind::InvalidData, "no certificate found").into());
+        }
 
         let mut key_reader = BufReader::new(File::open(key_path)?);
         let key = rustls_pemfile::pkcs8_private_keys(&mut key_reader)
             .next()
             .ok_or_else(|| io::Error::new(io::ErrorKind::InvalidData, "no private key found"))??;
 
-        Ok((cert, key))
+        Ok((cert_chain, key))
     }
 }

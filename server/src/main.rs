@@ -244,9 +244,9 @@ impl ServerState {
 #[tokio::main]
 async fn main() -> Result<(), anyhow::Error> {
     #[cfg(feature = "dev")]
-    let (cert, key) = net::cert::dev::generate_self_signed_cert()?;
+    let (cert_chain, key) = net::cert::dev::generate_self_signed_cert()?;
     #[cfg(not(feature = "dev"))]
-    let (cert, key) = net::cert::prod::load_certs_from_file(&*FULLCHAIN_PATH, &*PRIVKEY_PATH)?;
+    let (cert_chain, key) = net::cert::prod::load_certs_from_file(&*FULLCHAIN_PATH, &*PRIVKEY_PATH)?;
 
     let port: u16 = env::var("SERVER_PORT")
         .expect("SERVER_PORT must be set")
@@ -255,7 +255,7 @@ async fn main() -> Result<(), anyhow::Error> {
 
     let server_addr: SocketAddr = SocketAddr::V4(SocketAddrV4::new(Ipv4Addr::UNSPECIFIED, port));
 
-    let endpoint = net::make_server_endpoint(server_addr, cert, key)?;
+    let endpoint = net::make_server_endpoint(server_addr, cert_chain, key)?;
 
     let state = Arc::new(Mutex::new(ServerState::new()));
 
