@@ -46,12 +46,13 @@ impl ServerState {
         let player_id = self.next_player_id;
         self.players.insert(key, player_id);
         self.next_player_id.0 += 1;
+        println!("New player #{player_id:?}: {key}");
         Some(player_id)
     }
 
     pub fn lookup_player(&self, conn: &Connection) -> Option<PlayerId> {
         let key = conn.stable_id();
-        if self.players.contains_key(&key) {
+        if !self.players.contains_key(&key) {
             return None;
         }
         Some(self.players[&key])
@@ -81,6 +82,7 @@ impl ServerState {
             return Err(TableError::TableNotFound);
         }
 
+        self.player_id_to_table_map.insert(player, table);
         let curr_table = self.tables.get_mut(&table).unwrap();
         match curr_table {
             TableState::Game(_) => return Err(TableError::GameInProgress),
@@ -174,73 +176,85 @@ async fn main() -> Result<(), anyhow::Error> {
 
     let state = Arc::new(Mutex::new(ServerState::new()));
 
-    while let Some(conn) = endpoint.accept().await {
-        let connection = conn.await?;
+    // Start a new table first
+    {
+        let mut state = state.lock().await;
+        state.new_table();
+    }
 
-        while let Ok((mut send, mut recv)) = connection.accept_bi().await {
-            let recv_bytes = recv.read_to_end(1280).await?;
-            let client_msg: ClientMessage = protocol::decode(&String::from_utf8(recv_bytes)?);
-            let msg: ServerMessage = match client_msg {
-                ClientMessage::Hello => {
-                    let mut state = state.lock().await;
-                    let player_id = state.new_player(&connection);
-                    // If connection already established: Decline message
-                    match player_id {
-                        Some(player_id) => ServerMessage::Welcome(player_id),
-                        None => ServerMessage::AlreadyConnected,
-                    }
-                }
-                ClientMessage::JoinTable(table_id) => {
-                    let mut state = state.lock().await;
-                    match state.lookup_player(&connection) {
-                        Some(player_id) => match state.join_table(player_id, table_id) {
-                            Ok(()) => ServerMessage::TableJoinSuccess(table_id),
-                            Err(err) => ServerMessage::TableJoinFailed(err),
-                        },
-                        None => ServerMessage::TableJoinFailed(TableError::PlayerNotFound),
-                    }
-                }
-                ClientMessage::ConfigureTable(table_max_bet, big_blind, small_blind) => {
-                    let mut state = state.lock().await;
-                    match state.lookup_player(&connection) {
-                        Some(player_id) => {
-                            match state.configure_table(
-                                player_id,
-                                table_max_bet,
-                                big_blind,
-                                small_blind,
-                            ) {
-                                Ok(()) => ServerMessage::TableConfigureSuccess,
-                                Err(err) => ServerMessage::TableConfigureFailed(err),
-                            }
-                        }
-                        None => ServerMessage::TableJoinFailed(TableError::PlayerNotFound),
-                    }
-                }
-                ClientMessage::StartGame => {
-                    let mut state = state.lock().await;
-                    match state.lookup_player(&connection) {
-                        Some(player_id) => match state.start_game(player_id) {
-                            Ok(()) => ServerMessage::TableConfigureSuccess,
-                            Err(err) => ServerMessage::TableConfigureFailed(err),
-                        },
-                        None => ServerMessage::TableJoinFailed(TableError::PlayerNotFound),
-                    }
-                }
-                ClientMessage::Action(action) => {
-                    let mut state = state.lock().await;
-                    match state.lookup_player(&connection) {
-                        Some(player_id) => match state.execute_poker_action(player_id, action) {
-                            Ok(()) => ServerMessage::ActionAccepted,
-                            Err(err) => ServerMessage::ActionRejected(err),
-                        },
-                        None => ServerMessage::TableJoinFailed(TableError::PlayerNotFound),
-                    }
-                }
+    while let Some(conn) = endpoint.accept().await {
+        let state = Arc::clone(&state);
+        tokio::spawn(async move {
+            let connection = match conn.await {
+                Ok(c) => c,
+                Err(e) => { eprintln!("connection failed: {e}"); return; }
             };
 
-            net::reply(send, &msg).await?;
-        }
+            while let Ok((mut send, mut recv)) = connection.accept_bi().await {
+                let recv_bytes = recv.read_to_end(1280).await.expect("Error in receiving message");
+                let client_msg: ClientMessage = protocol::decode(&String::from_utf8(recv_bytes).unwrap());
+                let msg: ServerMessage = match client_msg {
+                    ClientMessage::Hello => {
+                        let mut state = state.lock().await;
+                        let player_id = state.new_player(&connection);
+                        // If connection already established: Decline message
+                        match player_id {
+                            Some(player_id) => ServerMessage::Welcome(player_id),
+                            None => ServerMessage::AlreadyConnected,
+                        }
+                    }
+                    ClientMessage::JoinTable(table_id) => {
+                        let mut state = state.lock().await;
+                        match state.lookup_player(&connection) {
+                            Some(player_id) => match state.join_table(player_id, table_id) {
+                                Ok(()) => ServerMessage::TableJoinSuccess(table_id),
+                                Err(err) => ServerMessage::TableJoinFailed(err),
+                            },
+                            None => ServerMessage::TableJoinFailed(TableError::PlayerNotFound),
+                        }
+                    }
+                    ClientMessage::ConfigureTable(table_max_bet, big_blind, small_blind) => {
+                        let mut state = state.lock().await;
+                        match state.lookup_player(&connection) {
+                            Some(player_id) => {
+                                match state.configure_table(
+                                    player_id,
+                                    table_max_bet,
+                                    big_blind,
+                                    small_blind,
+                                ) {
+                                    Ok(()) => ServerMessage::TableConfigureSuccess,
+                                    Err(err) => ServerMessage::TableConfigureFailed(err),
+                                }
+                            }
+                            None => ServerMessage::TableJoinFailed(TableError::PlayerNotFound),
+                        }
+                    }
+                    ClientMessage::StartGame => {
+                        let mut state = state.lock().await;
+                        match state.lookup_player(&connection) {
+                            Some(player_id) => match state.start_game(player_id) {
+                                Ok(()) => ServerMessage::TableConfigureSuccess,
+                                Err(err) => ServerMessage::TableConfigureFailed(err),
+                            },
+                            None => ServerMessage::TableJoinFailed(TableError::PlayerNotFound),
+                        }
+                    }
+                    ClientMessage::Action(action) => {
+                        let mut state = state.lock().await;
+                        match state.lookup_player(&connection) {
+                            Some(player_id) => match state.execute_poker_action(player_id, action) {
+                                Ok(()) => ServerMessage::ActionAccepted,
+                                Err(err) => ServerMessage::ActionRejected(err),
+                            },
+                            None => ServerMessage::TableJoinFailed(TableError::PlayerNotFound),
+                        }
+                    }
+                };
+
+                net::reply(send, &msg).await.expect("Error in replying");
+            }
+        });
     }
 
     Ok(())

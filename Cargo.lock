@@ -152,6 +152,14 @@ dependencies = [
 [[package]]
 name = "client"
 version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "net",
+ "poker-core",
+ "protocol",
+ "quinn",
+ "tokio",
+]
 
 [[package]]
 name = "cmake"
