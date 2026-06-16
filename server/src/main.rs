@@ -173,61 +173,60 @@ impl ServerState {
         }
     }
 
-    pub async fn notify_table(&self, table: TableId) -> Result<(), anyhow::Error> {
+    pub fn notify_table(&self, table: TableId) -> Vec<(Connection, ServerMessage)> {
         let curr_table = self.tables.get(&table).unwrap();
 
-        match curr_table {
-            TableState::Lobby(_) => {
-                panic!("Cannot notify participants of a game that's not ongoing!")
-            }
-            TableState::Game(game) => {
-                let players = game.get_player_ids();
+        let TableState::Game(game) = curr_table else {
+            panic!("Cannot notify participants of a game that's not ongoing!");
+        };
 
-                for player_id in players {
-                    let view = game.view_for(player_id);
-                    let conn = &self.connections[&player_id];
-                    net::push(conn, &ServerMessage::StateUpdate(view)).await?;
+        let players = game.get_player_ids();
+        let mut output: Vec<(Connection, ServerMessage)> = Vec::with_capacity(players.len() + 1);
 
-                    // Notify next player
-                    if game.is_next_player(player_id) {
-                        net::push(conn, &ServerMessage::ItsYourTurn).await?;
-                    }
-                }
+        for player_id in players {
+            let view = game.view_for(player_id);
+            let conn = &self.connections[&player_id];
+            output.push((conn.clone(), ServerMessage::StateUpdate(view)));
+            //net::push(conn, &ServerMessage::StateUpdate(view)).await?;
+
+            // Notify next player
+            if game.is_next_player(player_id) {
+                output.push((conn.clone(), ServerMessage::ItsYourTurn));
+                //net::push(conn, &ServerMessage::ItsYourTurn).await?;
             }
         }
 
-        Ok(())
+        output
     }
 
-    pub async fn end_game(&mut self, table: TableId) -> Result<(), anyhow::Error> {
+    pub fn end_game(&mut self, table: TableId) -> Vec<(Connection, ServerMessage)> {
         // Showdown, send showdown messages, eject all players, return to lobby
         let curr_table = self.tables.get_mut(&table).unwrap();
 
-        match curr_table {
-            TableState::Lobby(_) => {
-                panic!("Cannot showdown in a lobby!")
-            }
-            TableState::Game(game) => {
-                let players = game.get_player_ids();
+        let TableState::Game(game) = curr_table else {
+            panic!("Cannot notify participants of a game that's not ongoing!");
+        };
 
-                let showdown_result = game.get_showdown_results();
+        let players = game.get_player_ids();
+        let mut output: Vec<(Connection, ServerMessage)> = Vec::with_capacity(players.len() + 1);
 
-                for player_id in players {
-                    let conn = &self.connections[&player_id];
-                    net::push(conn, &ServerMessage::GameOver(showdown_result.clone())).await?;
-                }
+        let showdown_result = game.get_showdown_results();
 
-                // Reset table to lobby, keeping all players and settings
-                *curr_table = TableState::Lobby(Lobby {
-                    players: game.get_player_ids(),
-                    table_max_bet: game.table_max_bet,
-                    big_blind: game.big_blind,
-                    small_blind: game.small_blind,
-                });
-            }
+        for player_id in players {
+            let conn = &self.connections[&player_id];
+            //net::push(conn, &ServerMessage::GameOver(showdown_result.clone())).await?;
+            output.push((conn.clone(), ServerMessage::GameOver(showdown_result.clone())));
         }
 
-        Ok(())
+        // Reset table to lobby, keeping all players and settings
+        *curr_table = TableState::Lobby(Lobby {
+            players: game.get_player_ids(),
+            table_max_bet: game.table_max_bet,
+            big_blind: game.big_blind,
+            small_blind: game.small_blind,
+        });
+
+        output
     }
 }
 
@@ -304,41 +303,61 @@ async fn main() -> Result<(), anyhow::Error> {
                         }
                     }
                     ClientMessage::StartGame => {
-                        let mut state = state.lock().await;
-                        match state.lookup_player(&connection) {
-                            Some(player_id) => match state.start_game(player_id) {
-                                Ok(()) => {
-                                    let table_id = state.player_id_to_table_map[&player_id];
-                                    let _ = state.notify_table(table_id).await;
-                                    ServerMessage::TableConfigureSuccess
+                        let (result, messages_to_send) = {
+                            let mut state = state.lock().await;
+                            match state.lookup_player(&connection) {
+                                Some(player_id) => match state.start_game(player_id) {
+                                    Ok(()) => {
+                                        let table_id = state.player_id_to_table_map[&player_id];
+                                        let messages_to_send = state.notify_table(table_id);
+                                        (ServerMessage::TableConfigureSuccess, messages_to_send)
+                                    },
+                                    Err(err) => (ServerMessage::TableConfigureFailed(err), vec![]),
                                 },
-                                Err(err) => ServerMessage::TableConfigureFailed(err),
-                            },
-                            None => ServerMessage::TableJoinFailed(TableError::PlayerNotFound),
-                        }
+                                None => (ServerMessage::TableJoinFailed(TableError::PlayerNotFound), vec![]),
+                            }
+                        };
+
+                        // Network I/O after dropping mutex guard
+                        for (conn, message) in messages_to_send {
+                            let _ = net::push(&conn, &message).await; // updates fail silently
+                        } 
+
+                        result
                     }
                     ClientMessage::Action(action) => {
-                        let mut state = state.lock().await;
-                        match state.lookup_player(&connection) {
-                            Some(player_id) => {
-                                match state.execute_poker_action(player_id, action) {
-                                    Ok(game_over) => {
-                                        let table_id = state.player_id_to_table_map[&player_id];
-                                        if game_over {
-                                            // Hand finished: Notify showdown results to entire table
-                                            let _ = state.end_game(table_id).await;
-                                        } else {
-                                            // Notify entire table (and next player)
-                                            let _ = state.notify_table(table_id).await; // Update fails silently
-                                        }
+                        let (result, messages_to_send) = {
+                            let mut state = state.lock().await;
+                            match state.lookup_player(&connection) {
+                                Some(player_id) => {
+                                    match state.execute_poker_action(player_id, action) {
+                                        Ok(game_over) => {
+                                            let table_id = state.player_id_to_table_map[&player_id];
+                                            let messages = {
+                                                if game_over {
+                                                    // Hand finished: Notify showdown results to entire table
+                                                    state.end_game(table_id)
+                                                } else {
+                                                    // Notify entire table (and next player)
+                                                    state.notify_table(table_id)
+                                                }
+                                            };
 
-                                        ServerMessage::ActionAccepted
+                                            (ServerMessage::ActionAccepted, messages)
+                                        }
+                                        Err(err) => (ServerMessage::ActionRejected(err), vec![]),
                                     }
-                                    Err(err) => ServerMessage::ActionRejected(err),
                                 }
+                                None => (ServerMessage::TableJoinFailed(TableError::PlayerNotFound), vec![]),
                             }
-                            None => ServerMessage::TableJoinFailed(TableError::PlayerNotFound),
+                        };
+
+                        // Network I/O after dropping mutex guard
+                        for (conn, message) in messages_to_send {
+                            let _ = net::push(&conn, &message).await; // updates fail silently
                         }
+
+                        result
                     }
                 };
 
