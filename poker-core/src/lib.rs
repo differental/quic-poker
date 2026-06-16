@@ -358,6 +358,7 @@ pub struct PokerGame {
     player_to_action_idx: usize,
     last_raise_player_idx: usize,
     player_ids_to_idx_map: HashMap<PlayerId, usize>,
+    fold_counter: u64,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -549,6 +550,7 @@ impl PokerGame {
             player_to_action_idx: pre_flop_first_player,
             last_raise_player_idx: pre_flop_first_player,
             player_ids_to_idx_map,
+            fold_counter: 0,
         }
     }
 
@@ -601,6 +603,13 @@ impl PokerGame {
     fn advance_round(&mut self) -> bool {
         // Advance to next round. Executes showdown if called on a river-round game.
         // Returns if we've completed showdown. true if we have.
+
+        // If only one player hasn't folded, skip to showdown
+        if self.fold_counter == self.player_data.len() as u64 - 1 {
+            self.current_round = PokerRound::Showdown;
+            return true;
+        }
+
         match self.current_round {
             PokerRound::PreFlop => {
                 self.current_round = PokerRound::Flop;
@@ -678,11 +687,22 @@ impl PokerGame {
                 if curr_player.bet != self.current_bet {
                     return Err(RuleError::CheckOnBet);
                 }
+                // Check could signal all-in if blinds are same as max bet
+                if self.current_bet == self.table_max_bet {
+                    curr_player.allin = true;
+                }
                 // Check: Do nothing
             }
             Action::Fold => {
                 // Fold always legal
                 curr_player.folded = true;
+                self.fold_counter += 1;
+
+                // Check if there's only one player left - if so, proceed directly to showdown through advance_round
+                if self.fold_counter == self.player_data.len() as u64 - 1 {
+                    let showdown_finished = self.advance_round();
+                    return Ok(showdown_finished);
+                }
             }
             Action::Call => {
                 // Call only legal if player bet different from matching bet
@@ -828,6 +848,7 @@ mod tests {
             player_to_action_idx: 0,
             last_raise_player_idx: 0,
             player_ids_to_idx_map,
+            fold_counter: 0
         }
     }
 
