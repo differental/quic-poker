@@ -96,9 +96,10 @@ where
     T: std::str::FromStr,
     T::Err: std::fmt::Display,
 {
-    let raw = parts.next().ok_or_else(|| format!("missing argument `{name}`"))?;
-    raw.parse()
-        .map_err(|e| format!("invalid `{name}`: {e}"))
+    let raw = parts
+        .next()
+        .ok_or_else(|| format!("missing argument `{name}`"))?;
+    raw.parse().map_err(|e| format!("invalid `{name}`: {e}"))
 }
 
 fn print_help() {

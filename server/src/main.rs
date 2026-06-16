@@ -82,11 +82,13 @@ impl ServerState {
             return Err(TableError::TableNotFound);
         }
 
-        self.player_id_to_table_map.insert(player, table);
         let curr_table = self.tables.get_mut(&table).unwrap();
         match curr_table {
             TableState::Game(_) => return Err(TableError::GameInProgress),
-            TableState::Lobby(lobby) => lobby.players.push(player),
+            TableState::Lobby(lobby) => {
+                self.player_id_to_table_map.insert(player, table);
+                lobby.players.push(player);
+            }
         };
 
         Ok(())
@@ -187,12 +189,19 @@ async fn main() -> Result<(), anyhow::Error> {
         tokio::spawn(async move {
             let connection = match conn.await {
                 Ok(c) => c,
-                Err(e) => { eprintln!("connection failed: {e}"); return; }
+                Err(e) => {
+                    eprintln!("connection failed: {e}");
+                    return;
+                }
             };
 
             while let Ok((mut send, mut recv)) = connection.accept_bi().await {
-                let recv_bytes = recv.read_to_end(1280).await.expect("Error in receiving message");
-                let client_msg: ClientMessage = protocol::decode(&String::from_utf8(recv_bytes).unwrap());
+                let recv_bytes = recv
+                    .read_to_end(1280)
+                    .await
+                    .expect("Error in receiving message");
+                let client_msg: ClientMessage =
+                    protocol::decode(&String::from_utf8(recv_bytes).unwrap());
                 let msg: ServerMessage = match client_msg {
                     ClientMessage::Hello => {
                         let mut state = state.lock().await;
@@ -243,10 +252,12 @@ async fn main() -> Result<(), anyhow::Error> {
                     ClientMessage::Action(action) => {
                         let mut state = state.lock().await;
                         match state.lookup_player(&connection) {
-                            Some(player_id) => match state.execute_poker_action(player_id, action) {
-                                Ok(()) => ServerMessage::ActionAccepted,
-                                Err(err) => ServerMessage::ActionRejected(err),
-                            },
+                            Some(player_id) => {
+                                match state.execute_poker_action(player_id, action) {
+                                    Ok(()) => ServerMessage::ActionAccepted,
+                                    Err(err) => ServerMessage::ActionRejected(err),
+                                }
+                            }
                             None => ServerMessage::TableJoinFailed(TableError::PlayerNotFound),
                         }
                     }
