@@ -13,10 +13,10 @@ enum Command {
 
 #[tokio::main]
 async fn main() -> Result<(), anyhow::Error> {
-    let server_addr = parse_server_addr()?;
+    let (server_addr, server_name) = parse_server_addr().await?;
 
     let endpoint = net::make_client_endpoint()?;
-    let connection = net::connect_to_server(&endpoint, server_addr, "localhost").await?;
+    let connection = net::connect_to_server(&endpoint, server_addr, &server_name).await?;
 
     println!("Connected to {server_addr}.");
     print_help();
@@ -73,15 +73,31 @@ async fn main() -> Result<(), anyhow::Error> {
     Ok(())
 }
 
-/// Reads the server address from the first CLI argument, e.g.
-/// `client 127.0.0.1:5000`. Defaults to `127.0.0.1:5000` when omitted.
-fn parse_server_addr() -> Result<SocketAddr, anyhow::Error> {
-    match std::env::args().nth(1) {
-        Some(arg) => arg
-            .parse()
-            .map_err(|e| anyhow::anyhow!("invalid server address `{arg}`: {e}")),
-        None => Ok(SocketAddr::from(([127, 0, 0, 1], 5000))),
-    }
+/// Reads the server address from the first CLI argument, accepting either an IP
+/// or a domain, e.g. `client example.com:5000` or `client 127.0.0.1:5000`.
+/// Hostnames are resolved to a socket address via DNS; the host is also returned
+/// so it can be used for TLS server-name verification. Defaults to `127.0.0.1:5000`.
+async fn parse_server_addr() -> Result<(SocketAddr, String), anyhow::Error> {
+    let arg = std::env::args()
+        .nth(1)
+        .unwrap_or_else(|| "127.0.0.1:5000".to_string());
+
+    let (host, _port) = arg
+        .rsplit_once(':')
+        .ok_or_else(|| anyhow::anyhow!("invalid server address `{arg}`: expected `host:port`"))?;
+    
+    // Strip the brackets from an IPv6 literal (`[::1]:5000`) so the SNI name is
+    // the bare host.
+    let host = host.trim_start_matches('[').trim_end_matches(']').to_string();
+
+    // DNS resolution
+    let addr = tokio::net::lookup_host(arg.as_str())
+        .await
+        .map_err(|e| anyhow::anyhow!("failed to resolve server address `{arg}`: {e}"))?
+        .find(SocketAddr::is_ipv4)
+        .ok_or_else(|| anyhow::anyhow!("no IPv4 address found for server address `{arg}`"))?;
+
+    Ok((addr, host))
 }
 
 /// Displays a server-initiated notification (a state update or a turn alert),
