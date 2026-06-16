@@ -848,7 +848,7 @@ mod tests {
             player_to_action_idx: 0,
             last_raise_player_idx: 0,
             player_ids_to_idx_map,
-            fold_counter: 0
+            fold_counter: 0,
         }
     }
 

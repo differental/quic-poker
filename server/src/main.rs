@@ -1,11 +1,18 @@
 use poker_core::{Action, PlayerId, PokerGame};
 use protocol::{ActionError, ClientMessage, ServerMessage, TableError, TableId};
 use quinn::Connection;
-use std::net::{Ipv4Addr, SocketAddr, SocketAddrV4};
-use std::sync::Arc;
 use tokio::sync::Mutex;
 
-use std::collections::HashMap;
+use std::{
+    collections::HashMap,
+    net::{Ipv4Addr, SocketAddr, SocketAddrV4},
+    sync::Arc,
+};
+
+mod constants;
+
+#[cfg(not(feature = "dev"))]
+use constants::{FULLCHAIN_PATH, PRIVKEY_PATH};
 
 struct Lobby {
     players: Vec<PlayerId>,
@@ -215,7 +222,10 @@ impl ServerState {
         for player_id in players {
             let conn = &self.connections[&player_id];
             //net::push(conn, &ServerMessage::GameOver(showdown_result.clone())).await?;
-            output.push((conn.clone(), ServerMessage::GameOver(showdown_result.clone())));
+            output.push((
+                conn.clone(),
+                ServerMessage::GameOver(showdown_result.clone()),
+            ));
         }
 
         // Reset table to lobby, keeping all players and settings
@@ -232,7 +242,10 @@ impl ServerState {
 
 #[tokio::main]
 async fn main() -> Result<(), anyhow::Error> {
+    #[cfg(feature = "dev")]
     let (cert, key) = net::cert::dev::generate_self_signed_cert()?;
+    #[cfg(not(feature = "dev"))]
+    let (cert, key) = net::cert::prod::load_certs_from_file(&*FULLCHAIN_PATH, &*PRIVKEY_PATH)?;
 
     const SERVER_ADDR: SocketAddr = SocketAddr::V4(SocketAddrV4::new(Ipv4Addr::LOCALHOST, 5000));
 
@@ -311,17 +324,20 @@ async fn main() -> Result<(), anyhow::Error> {
                                         let table_id = state.player_id_to_table_map[&player_id];
                                         let messages_to_send = state.notify_table(table_id);
                                         (ServerMessage::TableConfigureSuccess, messages_to_send)
-                                    },
+                                    }
                                     Err(err) => (ServerMessage::TableConfigureFailed(err), vec![]),
                                 },
-                                None => (ServerMessage::TableJoinFailed(TableError::PlayerNotFound), vec![]),
+                                None => (
+                                    ServerMessage::TableJoinFailed(TableError::PlayerNotFound),
+                                    vec![],
+                                ),
                             }
                         };
 
                         // Network I/O after dropping mutex guard
                         for (conn, message) in messages_to_send {
                             let _ = net::push(&conn, &message).await; // updates fail silently
-                        } 
+                        }
 
                         result
                     }
@@ -348,7 +364,10 @@ async fn main() -> Result<(), anyhow::Error> {
                                         Err(err) => (ServerMessage::ActionRejected(err), vec![]),
                                     }
                                 }
-                                None => (ServerMessage::TableJoinFailed(TableError::PlayerNotFound), vec![]),
+                                None => (
+                                    ServerMessage::TableJoinFailed(TableError::PlayerNotFound),
+                                    vec![],
+                                ),
                             }
                         };
 

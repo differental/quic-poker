@@ -114,9 +114,15 @@ pub mod dev {
 
 #[cfg(not(feature = "dev"))]
 pub mod prod {
-    use std::sync::Arc;
+    use std::{
+        fs::File,
+        io::{self, BufReader},
+        path::Path,
+        sync::Arc,
+    };
 
     use quinn::{ClientConfig, crypto::rustls::QuicClientConfig};
+    use rustls::pki_types::{CertificateDer, PrivatePkcs8KeyDer};
 
     use crate::error::NetError;
 
@@ -136,5 +142,22 @@ pub mod prod {
         Ok(ClientConfig::new(Arc::new(QuicClientConfig::try_from(
             crypto,
         )?)))
+    }
+
+    pub fn load_certs_from_file(
+        cert_path: impl AsRef<Path>,
+        key_path: impl AsRef<Path>,
+    ) -> Result<(CertificateDer<'static>, PrivatePkcs8KeyDer<'static>), NetError> {
+        let mut cert_reader = BufReader::new(File::open(cert_path)?);
+        let cert = rustls_pemfile::certs(&mut cert_reader)
+            .next()
+            .ok_or_else(|| io::Error::new(io::ErrorKind::InvalidData, "no certificate found"))??;
+
+        let mut key_reader = BufReader::new(File::open(key_path)?);
+        let key = rustls_pemfile::pkcs8_private_keys(&mut key_reader)
+            .next()
+            .ok_or_else(|| io::Error::new(io::ErrorKind::InvalidData, "no private key found"))??;
+
+        Ok((cert, key))
     }
 }

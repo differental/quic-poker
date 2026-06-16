@@ -8,6 +8,7 @@ license = "AGPL-3.0-only"
 quinn = { workspace = true }
 rustls = "0.23"
 webpki-roots = "1"
+rustls-pemfile = "2.2"
 rcgen = { version = "0.14", optional = true }
 protocol = { path = "../protocol" }
 
