@@ -5,6 +5,7 @@ use tokio::sync::Mutex;
 
 use std::{
     collections::HashMap,
+    env,
     net::{Ipv4Addr, SocketAddr, SocketAddrV4},
     sync::Arc,
 };
@@ -247,9 +248,14 @@ async fn main() -> Result<(), anyhow::Error> {
     #[cfg(not(feature = "dev"))]
     let (cert, key) = net::cert::prod::load_certs_from_file(&*FULLCHAIN_PATH, &*PRIVKEY_PATH)?;
 
-    const SERVER_ADDR: SocketAddr = SocketAddr::V4(SocketAddrV4::new(Ipv4Addr::LOCALHOST, 5000));
+    let port: u16 = env::var("SERVER_PORT")
+        .expect("SERVER_PORT must be set")
+        .parse()
+        .expect("SERVER_PORT must be an integer");
 
-    let endpoint = net::make_server_endpoint(SERVER_ADDR, cert, key)?;
+    let server_addr: SocketAddr = SocketAddr::V4(SocketAddrV4::new(Ipv4Addr::BROADCAST, port));
+
+    let endpoint = net::make_server_endpoint(server_addr, cert, key)?;
 
     let state = Arc::new(Mutex::new(ServerState::new()));
 

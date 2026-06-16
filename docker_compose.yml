@@ -1,0 +1,23 @@
+services:
+  quic-server:
+    build:
+      context: .
+      dockerfile: Dockerfile
+
+    image: quic-server
+
+    ports:
+      - "5000:5000/udp"
+
+    volumes:
+      - /etc/letsencrypt:/etc/letsencrypt:ro
+
+    environment:
+      SERVER_PORT: "5000"
+      FULLCHAIN_PATH: "${FULLCHAIN_PATH}"
+      PRIVKEY_PATH: "${PRIVKEY_PATH}"
+
+    env_file:
+      - stack.env
+
+    restart: unless-stopped
