@@ -5,3 +5,11 @@ edition = "2024"
 license = "AGPL-3.0-only"
 
 [dependencies]
+
+poker-core = { path = "../poker-core" }
+protocol = { path = "../protocol" }
+net = { path = "../net", features = ["dev"] }
+
+tokio = { workspace = true }
+quinn = { workspace = true }
+anyhow = "1.0.102"

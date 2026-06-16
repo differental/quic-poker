@@ -1,5 +1,6 @@
 use quinn::crypto::rustls::NoInitialCipherSuite;
 
+#[derive(Debug)]
 pub enum NetError {
     Connect(quinn::ConnectError),
     Connection(quinn::ConnectionError),
@@ -53,12 +54,47 @@ impl From<NoInitialCipherSuite> for NetError {
 #[cfg(feature = "dev")]
 impl From<rcgen::Error> for NetError {
     fn from(value: rcgen::Error) -> Self {
-        Neterror::RcError(value)
+        NetError::RcGen(value)
     }
 }
 
 impl From<std::io::Error> for NetError {
     fn from(value: std::io::Error) -> Self {
         NetError::Io(value)
+    }
+}
+
+impl std::fmt::Display for NetError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            NetError::Connect(e) => write!(f, "failed to initiate connection: {e}"),
+            NetError::Connection(e) => write!(f, "connection error: {e}"),
+            NetError::Write(e) => write!(f, "failed to write to stream: {e}"),
+            NetError::Read(e) => write!(f, "failed to read from stream: {e}"),
+            NetError::Rustls(e) => write!(f, "TLS error: {e}"),
+            NetError::Cipher(e) => write!(f, "invalid initial cipher suite: {e}"),
+            #[cfg(feature = "dev")]
+            NetError::RcGen(e) => write!(f, "certificate generation error: {e}"),
+            NetError::Io(e) => write!(f, "I/O error: {e}"),
+            NetError::Decode() => write!(f, "failed to decode message"),
+            NetError::Config() => write!(f, "endpoint configuration error"),
+        }
+    }
+}
+
+impl std::error::Error for NetError {
+    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+        match self {
+            NetError::Connect(e) => Some(e),
+            NetError::Connection(e) => Some(e),
+            NetError::Write(e) => Some(e),
+            NetError::Read(e) => Some(e),
+            NetError::Rustls(e) => Some(e),
+            NetError::Cipher(e) => Some(e),
+            #[cfg(feature = "dev")]
+            NetError::RcGen(e) => Some(e),
+            NetError::Io(e) => Some(e),
+            NetError::Decode() | NetError::Config() => None,
+        }
     }
 }

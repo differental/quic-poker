@@ -4,7 +4,7 @@ use std::net::{Ipv4Addr, SocketAddr, SocketAddrV4};
 
 use protocol::{ClientMessage, ServerMessage};
 
-mod cert;
+pub mod cert;
 mod error;
 
 pub use cert::configure_server;

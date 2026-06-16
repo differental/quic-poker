@@ -24,7 +24,7 @@ pub fn configure_server(
 #[cfg(feature = "dev")]
 pub mod dev {
     // Use self-signed certificates (INSECURE!!) for dev purposes
-    use std::{error::Error, sync::Arc};
+    use std::sync::Arc;
 
     use quinn::{ClientConfig, crypto::rustls::QuicClientConfig};
     use rustls::{

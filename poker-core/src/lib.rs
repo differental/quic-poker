@@ -524,6 +524,8 @@ pub struct PokerGame {
     community_cards: Vec<Card>,
     player_data: Vec<PlayerData>,
     table_max_bet: u64,
+    big_blind: u64,
+    small_blind: u64,
     player_to_action_idx: usize,
     last_raise_player_idx: usize,
     player_ids_to_idx_map: HashMap<PlayerId, usize>,
@@ -548,7 +550,7 @@ pub struct PokerGameView {
     player_to_action_idx: usize,
 }
 
-#[derive(Clone, Serialize, Deserialize)]
+#[derive(Clone, Copy, Serialize, Deserialize)]
 pub enum RuleError {
     NotYourTurn,
     CheckOnBet,
@@ -601,6 +603,8 @@ impl PokerGame {
             current_bet: big_blind,
             community_cards,
             table_max_bet,
+            big_blind,
+            small_blind,
             player_data,
             player_to_action_idx: pre_flop_first_player,
             last_raise_player_idx: pre_flop_first_player,
@@ -820,6 +824,8 @@ mod tests {
             current_bet: 100,
             community_cards: vec![],
             player_data,
+            big_blind: 100,
+            small_blind: 50,
             table_max_bet: 10_000,
             player_to_action_idx: 0,
             last_raise_player_idx: 0,
