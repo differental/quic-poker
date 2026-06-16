@@ -1,4 +1,4 @@
-FROM rust:1.86-slim AS builder
+FROM rust:1.96-slim AS builder
 
 WORKDIR /build
 
@@ -6,7 +6,7 @@ COPY . .
 
 RUN cargo build --release --locked -p server
 
-FROM debian:bookworm-slim AS runtime
+FROM debian:trixie-slim AS runtime
 
 RUN apt-get update \
     && apt-get install -y --no-install-recommends ca-certificates \
