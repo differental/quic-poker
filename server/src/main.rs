@@ -2,6 +2,8 @@ use poker_core::{Action, PlayerId, PokerGame};
 use protocol::{ActionError, ClientMessage, ServerMessage, TableError, TableId};
 use quinn::Connection;
 use tokio::sync::Mutex;
+use tracing::{debug, error, info, warn};
+use tracing_subscriber::EnvFilter;
 
 use std::{
     collections::HashMap,
@@ -57,7 +59,7 @@ impl ServerState {
         self.players.insert(key, player_id);
         self.connections.insert(player_id, conn.clone());
         self.next_player_id.0 += 1;
-        println!("New player #{player_id:?}: {key}");
+        info!(?player_id, stable_id = key, "Registered new player");
         Some(player_id)
     }
 
@@ -243,6 +245,13 @@ impl ServerState {
 
 #[tokio::main]
 async fn main() -> Result<(), anyhow::Error> {
+    // Use RUST_LOG if set, otherwise default to "info"
+    tracing_subscriber::fmt()
+        .with_env_filter(
+            EnvFilter::try_from_default_env().unwrap_or_else(|_| EnvFilter::new("info")),
+        )
+        .init();
+
     #[cfg(feature = "dev")]
     let (cert_chain, key) = net::cert::dev::generate_self_signed_cert()?;
     #[cfg(not(feature = "dev"))]
@@ -257,13 +266,17 @@ async fn main() -> Result<(), anyhow::Error> {
     let server_addr: SocketAddr = SocketAddr::V4(SocketAddrV4::new(Ipv4Addr::UNSPECIFIED, port));
 
     let endpoint = net::make_server_endpoint(server_addr, cert_chain, key)?;
+    info!(%server_addr, "Server started");
 
     let state = Arc::new(Mutex::new(ServerState::new()));
 
-    // Start a new table first
+    // Start ten new tables first
     {
         let mut state = state.lock().await;
-        state.new_table();
+        for _ in 0..10 {
+            let _ = state.new_table();
+        }
+        info!("Table created");
     }
 
     while let Some(conn) = endpoint.accept().await {
@@ -272,19 +285,36 @@ async fn main() -> Result<(), anyhow::Error> {
             let connection = match conn.await {
                 Ok(c) => c,
                 Err(e) => {
-                    eprintln!("connection failed: {e}");
+                    error!(error = %e, "Failed to establish connection");
                     return;
                 }
             };
+            let remote = connection.remote_address();
+            info!(%remote, "Connection established");
 
             while let Ok((mut send, mut recv)) = connection.accept_bi().await {
-                let recv_bytes = recv
-                    .read_to_end(1280)
-                    .await
-                    .expect("Error in receiving message");
-                let client_msg: ClientMessage =
-                    protocol::decode(&String::from_utf8(recv_bytes).unwrap())
-                        .expect("Error in decoding message");
+                let recv_bytes = match recv.read_to_end(1280).await {
+                    Ok(bytes) => bytes,
+                    Err(e) => {
+                        error!(%remote, error = %e, "Failed to receive message");
+                        break;
+                    }
+                };
+                let payload = match String::from_utf8(recv_bytes) {
+                    Ok(payload) => payload,
+                    Err(e) => {
+                        warn!(%remote, error = %e, "Received non-UTF8 message");
+                        break;
+                    }
+                };
+                let client_msg: ClientMessage = match protocol::decode(&payload) {
+                    Ok(msg) => msg,
+                    Err(e) => {
+                        warn!(%remote, error = %e, payload = %payload, "Failed to decode message");
+                        break;
+                    }
+                };
+                debug!(%remote, payload = %payload, "received message");
                 let msg: ServerMessage = match client_msg {
                     ClientMessage::Hello => {
                         let mut state = state.lock().await;
@@ -387,10 +417,12 @@ async fn main() -> Result<(), anyhow::Error> {
                     }
                 };
 
-                net::reply(&mut send, &msg)
-                    .await
-                    .expect("Error in replying");
+                if let Err(e) = net::reply(&mut send, &msg).await {
+                    error!(%remote, error = %e, "Failed to send reply");
+                    break;
+                }
             }
+            info!(%remote, "Connection closed");
         });
     }
 
