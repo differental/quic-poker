@@ -149,7 +149,7 @@ checksum = "613afe47fcd5fac7ccf1db93babcb082c5994d996f20b8b159f2ad1658eb5724"
 
 [[package]]
 name = "client"
-version = "0.1.0"
+version = "1.0.0"
 dependencies = [
  "anyhow",
  "net",
@@ -455,7 +455,7 @@ dependencies = [
 
 [[package]]
 name = "net"
-version = "0.1.0"
+version = "1.0.0"
 dependencies = [
  "protocol",
  "quinn",
@@ -557,7 +557,7 @@ checksum = "a89322df9ebe1c1578d689c92318e070967d1042b512afbe49518723f4e6d5cd"
 
 [[package]]
 name = "poker-core"
-version = "0.1.0"
+version = "1.0.0"
 dependencies = [
  "itertools",
  "rand",
@@ -590,7 +590,7 @@ dependencies = [
 
 [[package]]
 name = "protocol"
-version = "0.1.0"
+version = "1.0.0"
 dependencies = [
  "poker-core",
  "rmp-serde",
@@ -942,7 +942,7 @@ dependencies = [
 
 [[package]]
 name = "server"
-version = "0.1.0"
+version = "1.0.0"
 dependencies = [
  "anyhow",
  "net",
