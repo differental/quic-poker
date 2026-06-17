@@ -448,10 +448,18 @@ impl fmt::Display for PokerGameView {
             } else {
                 ""
             };
+            let blind = match idx {
+                0 => "[Button]",
+                1 => "    [SB]",
+                2 => "    [BB]",
+                3 => "   [UTG]",
+                _ => "        ",
+            };
+
             writeln!(
                 f,
-                "  player {}: bet {}{}{}",
-                player.id.0, player.bet, status, to_act
+                "{} player {}: bet {}{}{}",
+                blind, player.id.0, player.bet, status, to_act
             )?;
         }
 

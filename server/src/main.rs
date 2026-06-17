@@ -83,6 +83,7 @@ impl ServerState {
                 small_blind: 5u64,
             }),
         );
+        debug!(?table_id, "Created table");
         table_id
     }
 
@@ -112,6 +113,7 @@ impl ServerState {
                 self.player_id_to_table_map.insert(player, table);
                 lobby.players.push(player);
 
+                debug!(?player, ?table, "Player joined table");
                 Ok(messages)
             }
         }
@@ -143,6 +145,14 @@ impl ServerState {
             }
         };
 
+        debug!(
+            ?player,
+            ?table,
+            table_max_bet,
+            big_blind,
+            small_blind,
+            "Configured table"
+        );
         Ok(())
     }
 
@@ -162,6 +172,7 @@ impl ServerState {
                     return Err(TableError::TooManyPlayers);
                 }
 
+                let num_players = lobby.players.len();
                 *curr_table = TableState::Game(PokerGame::new(
                     &lobby.players,
                     lobby.small_blind,
@@ -169,6 +180,7 @@ impl ServerState {
                     lobby.table_max_bet,
                 ));
 
+                debug!(?player, ?table, num_players, "Started game");
                 Ok(())
             }
             TableState::Game(_) => Err(TableError::GameInProgress),
@@ -189,7 +201,17 @@ impl ServerState {
 
         match curr_table {
             TableState::Lobby(_) => Err(ActionError::Table(TableError::GameNotStarted)),
-            TableState::Game(game) => game.action(player, action).map_err(ActionError::Rule),
+            TableState::Game(game) => {
+                let game_over = game.action(player, action).map_err(ActionError::Rule)?;
+                debug!(
+                    ?player,
+                    ?table,
+                    ?action,
+                    game_over,
+                    "Player action accepted"
+                );
+                Ok(game_over)
+            }
         }
     }
 
@@ -216,6 +238,7 @@ impl ServerState {
 
             // Notify next player
             if game.is_next_player(player_id) {
+                debug!(?player_id, ?table, "It's this player's turn");
                 output.push((conn.clone(), ServerMessage::ItsYourTurn));
                 //net::push(conn, &ServerMessage::ItsYourTurn).await?;
             }
@@ -227,12 +250,18 @@ impl ServerState {
     pub fn handle_disconnect(&mut self, conn: &Connection) -> Vec<(Connection, ServerMessage)> {
         let Some(player_id) = self.players.remove(&conn.stable_id()) else {
             // Player never registered
+            debug!(
+                stable_id = conn.stable_id(),
+                "Disconnect from unregistered connection"
+            );
             return vec![];
         };
         self.connections.remove(&player_id);
+        debug!(?player_id, "Player disconnected");
 
         let Some(table_id) = self.player_id_to_table_map.remove(&player_id) else {
             // Player not in table
+            debug!(?player_id, "Disconnected player was not in a table");
             return vec![];
         };
 
@@ -243,6 +272,11 @@ impl ServerState {
             Some(TableState::Lobby(lobby)) => {
                 // Remove player from lobby and do nothing else
                 lobby.players.retain(|p| *p != player_id);
+                debug!(
+                    ?player_id,
+                    ?table_id,
+                    "Removed disconnected player from lobby"
+                );
 
                 for other_player in &lobby.players {
                     let conn = &self.connections[other_player];
@@ -251,6 +285,12 @@ impl ServerState {
             }
             Some(TableState::Game(game)) => {
                 let game_over = game.fold_disconnected(player_id);
+                debug!(
+                    ?player_id,
+                    ?table_id,
+                    game_over,
+                    "Folded disconnected player"
+                );
 
                 // Notify the D/C
                 for other_player in &game.get_player_ids() {
@@ -290,6 +330,12 @@ impl ServerState {
 
         let players = game.get_player_ids();
         let mut output: Vec<(Connection, ServerMessage)> = Vec::with_capacity(players.len() + 1);
+
+        debug!(
+            ?table,
+            num_players = players.len(),
+            "Hand finished, sending showdown results and resetting to lobby"
+        );
 
         let showdown_result = game.get_showdown_results();
 
