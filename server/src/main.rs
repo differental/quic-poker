@@ -380,21 +380,14 @@ async fn main() -> Result<(), anyhow::Error> {
                         break;
                     }
                 };
-                let payload = match String::from_utf8(recv_bytes) {
-                    Ok(payload) => payload,
-                    Err(e) => {
-                        warn!(%remote, error = %e, "Received non-UTF8 message");
-                        break;
-                    }
-                };
-                let client_msg: ClientMessage = match protocol::decode(&payload) {
+                let client_msg: ClientMessage = match protocol::decode(&recv_bytes) {
                     Ok(msg) => msg,
                     Err(e) => {
-                        warn!(%remote, error = %e, payload = %payload, "Failed to decode message");
+                        warn!(%remote, error = %e, "Failed to decode message");
                         break;
                     }
                 };
-                debug!(%remote, payload = %payload, "received message");
+                debug!(%remote, ?client_msg, "received message");
                 let msg: ServerMessage = match client_msg {
                     ClientMessage::Hello => {
                         let mut state = state.lock().await;

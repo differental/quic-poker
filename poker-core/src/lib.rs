@@ -369,7 +369,7 @@ pub struct PlayerDataView {
     allin: bool,
 }
 
-#[derive(Clone, Serialize, Deserialize)]
+#[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct PokerGameView {
     current_round: PokerRound,
     current_bet: u64,
@@ -389,7 +389,7 @@ pub enum RuleError {
     ExceedTableMax,
 }
 
-#[derive(Clone, Serialize, Deserialize)]
+#[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct PokerGameResult {
     winners: Vec<PlayerId>,
     total_pot: u64,

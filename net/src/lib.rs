@@ -71,22 +71,20 @@ pub async fn connect_to_server(
 pub async fn request(conn: &Connection, msg: &ClientMessage) -> Result<ServerMessage, NetError> {
     // Client encodes a message and sends a request (e.g., join table, or poker action) to server, await server response, then decode the response.
     let (mut send, mut recv) = conn.open_bi().await?;
-    let encoded = protocol::encode(msg)?;
-    let encoded_bytes = encoded.into_bytes();
+    let encoded_bytes = protocol::encode(msg)?;
 
     send.write_all(&encoded_bytes).await?;
     send.finish()?;
 
-    let received = recv.read_to_end(5120).await?;
-    let received_str = String::from_utf8(received).unwrap();
+    let received_bytes = recv.read_to_end(5120).await?;
+    let received_msg = protocol::decode(&received_bytes)?;
 
-    Ok(protocol::decode(&received_str)?)
+    Ok(received_msg)
 }
 
 pub async fn reply(send: &mut SendStream, msg: &ServerMessage) -> Result<(), NetError> {
     // Server encodes a message and uses the end stream to send it to client.
-    let encoded = protocol::encode(msg)?;
-    let encoded_bytes = encoded.into_bytes();
+    let encoded_bytes = protocol::encode(msg)?;
 
     send.write_all(&encoded_bytes).await?;
     send.finish()?;
@@ -97,8 +95,7 @@ pub async fn reply(send: &mut SendStream, msg: &ServerMessage) -> Result<(), Net
 pub async fn push(conn: &Connection, msg: &ServerMessage) -> Result<(), NetError> {
     // Server pushes a unidirectional message to client.
     let mut send = conn.open_uni().await?;
-    let encoded = protocol::encode(msg)?;
-    let encoded_bytes = encoded.into_bytes();
+    let encoded_bytes = protocol::encode(msg)?;
 
     send.write_all(&encoded_bytes).await?;
     send.finish()?;
@@ -110,8 +107,8 @@ pub async fn receive_push(conn: &Connection) -> Result<ServerMessage, NetError> 
     // Client receives unidirectional pushes from server.
     let mut recv = conn.accept_uni().await?;
 
-    let received = recv.read_to_end(5120).await?;
-    let received_str = String::from_utf8(received).unwrap();
+    let received_bytes = recv.read_to_end(5120).await?;
+    let received_msg = protocol::decode(&received_bytes)?;
 
-    Ok(protocol::decode(&received_str)?)
+    Ok(received_msg)
 }

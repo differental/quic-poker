@@ -1,8 +1,9 @@
 use poker_core::{Action, PlayerId, PokerGameResult, PokerGameView, RuleError};
+pub use rmp_serde::decode::Error as DecodeError;
+pub use rmp_serde::encode::Error as EncodeError;
 use serde::{Deserialize, Serialize};
-pub use serde_json::Error as SerdeError;
 
-#[derive(Clone, Copy, Serialize, Deserialize)]
+#[derive(Clone, Copy, Debug, Serialize, Deserialize)]
 pub enum TableError {
     PlayerNotFound,
     PlayerAlreadyInTable,
@@ -15,13 +16,13 @@ pub enum TableError {
     InvalidTableConfig,
 }
 
-#[derive(Clone, Copy, Serialize, Deserialize)]
+#[derive(Clone, Copy, Debug, Serialize, Deserialize)]
 pub enum ActionError {
     Rule(RuleError),
     Table(TableError),
 }
 
-#[derive(Serialize, Deserialize)]
+#[derive(Debug, Serialize, Deserialize)]
 pub enum ServerMessage {
     // All messages from server to client.
     Welcome(PlayerId),
@@ -40,10 +41,10 @@ pub enum ServerMessage {
     GameOver(PokerGameResult),
 }
 
-#[derive(Clone, Copy, Eq, Hash, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Copy, Eq, Hash, Debug, PartialEq, Serialize, Deserialize)]
 pub struct TableId(pub u32);
 
-#[derive(Serialize, Deserialize)]
+#[derive(Debug, Serialize, Deserialize)]
 pub enum ClientMessage {
     // All messages from client to server.
     Hello,
@@ -53,10 +54,10 @@ pub enum ClientMessage {
     Action(Action),
 }
 
-pub fn encode<T: Serialize>(message: &T) -> Result<String, serde_json::Error> {
-    serde_json::to_string(message)
+pub fn encode<T: Serialize>(message: &T) -> Result<Vec<u8>, rmp_serde::encode::Error> {
+    rmp_serde::to_vec(message)
 }
 
-pub fn decode<'a, T: Deserialize<'a>>(message: &'a str) -> Result<T, serde_json::Error> {
-    serde_json::from_str(message)
+pub fn decode<'a, T: Deserialize<'a>>(message: &'a [u8]) -> Result<T, rmp_serde::decode::Error> {
+    rmp_serde::from_slice(message)
 }
