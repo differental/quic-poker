@@ -9,6 +9,5 @@ poker-core = { path = "../poker-core" }
 protocol = { path = "../protocol" }
 net = { path = "../net" }
 
-tokio = { workspace = true }
-quinn = { workspace = true }
-anyhow = "1.0.102"
+anyhow = { workspace = true }
+tokio = { workspace = true, features = ["macros", "rt-multi-thread", "net"] }

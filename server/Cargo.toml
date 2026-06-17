@@ -9,9 +9,9 @@ poker-core = { path = "../poker-core" }
 protocol = { path = "../protocol" }
 net = { path = "../net" }
 
-tokio = { workspace = true }
+tokio = { workspace = true, features = ["macros", "rt-multi-thread", "sync"] }
 quinn = { workspace = true }
-anyhow = "1.0"
+anyhow = { workspace = true }
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 
