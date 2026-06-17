@@ -34,6 +34,9 @@ pub enum ServerMessage {
     ItsYourTurn,
     ActionAccepted,
     ActionRejected(ActionError),
+    PlayerJoinedTable(PlayerId),
+    PlayerDisconnected(PlayerId),          // Lobby D/C
+    PlayerDisconnectedAndFolded(PlayerId), // In-game D/C
     GameOver(PokerGameResult),
 }
 

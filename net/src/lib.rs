@@ -21,12 +21,12 @@ use error::NetError;
 
 /// Idle period after which QUIC tears down a silent connection. The effective
 /// timeout is the minimum of what both peers advertise.
-const MAX_IDLE_TIMEOUT: Duration = Duration::from_secs(180);
+const MAX_IDLE_TIMEOUT: Duration = Duration::from_secs(30);
 /// How often a peer sends PING frames to keep an otherwise-silent connection
 /// alive. Kept well under half of [`MAX_IDLE_TIMEOUT`] so a dropped PING won't
 /// trip the idle timeout. Players who sit thinking between actions would
 /// otherwise be disconnected.
-const KEEP_ALIVE_INTERVAL: Duration = Duration::from_secs(10);
+const KEEP_ALIVE_INTERVAL: Duration = Duration::from_secs(5);
 
 /// Transport config shared by the server and client.
 fn transport_config() -> TransportConfig {

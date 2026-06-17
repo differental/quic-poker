@@ -86,7 +86,11 @@ impl ServerState {
         table_id
     }
 
-    pub fn join_table(&mut self, player: PlayerId, table: TableId) -> Result<(), TableError> {
+    pub fn join_table(
+        &mut self,
+        player: PlayerId,
+        table: TableId,
+    ) -> Result<Vec<(Connection, ServerMessage)>, TableError> {
         if self.player_id_to_table_map.contains_key(&player) {
             // Player already in table
             return Err(TableError::PlayerAlreadyInTable);
@@ -95,16 +99,22 @@ impl ServerState {
             return Err(TableError::TableNotFound);
         }
 
+        let mut messages = vec![];
+
         let curr_table = self.tables.get_mut(&table).unwrap();
         match curr_table {
-            TableState::Game(_) => return Err(TableError::GameInProgress),
+            TableState::Game(_) => Err(TableError::GameInProgress),
             TableState::Lobby(lobby) => {
+                for existing_player in &lobby.players {
+                    let conn = &self.connections[existing_player];
+                    messages.push((conn.clone(), ServerMessage::PlayerJoinedTable(player)));
+                }
                 self.player_id_to_table_map.insert(player, table);
                 lobby.players.push(player);
-            }
-        };
 
-        Ok(())
+                Ok(messages)
+            }
+        }
     }
 
     pub fn configure_table(
@@ -194,6 +204,11 @@ impl ServerState {
         let mut output: Vec<(Connection, ServerMessage)> = Vec::with_capacity(players.len() + 1);
 
         for player_id in players {
+            // Skip DC'd players
+            if !self.connections.contains_key(&player_id) {
+                continue;
+            }
+
             let view = game.view_for(player_id);
             let conn = &self.connections[&player_id];
             output.push((conn.clone(), ServerMessage::StateUpdate(view)));
@@ -207,6 +222,62 @@ impl ServerState {
         }
 
         output
+    }
+
+    pub fn handle_disconnect(&mut self, conn: &Connection) -> Vec<(Connection, ServerMessage)> {
+        let Some(player_id) = self.players.remove(&conn.stable_id()) else {
+            // Player never registered
+            return vec![];
+        };
+        self.connections.remove(&player_id);
+
+        let Some(table_id) = self.player_id_to_table_map.remove(&player_id) else {
+            // Player not in table
+            return vec![];
+        };
+
+        let mut messages = Vec::new();
+
+        match self.tables.get_mut(&table_id) {
+            None => unreachable!(),
+            Some(TableState::Lobby(lobby)) => {
+                // Remove player from lobby and do nothing else
+                lobby.players.retain(|p| *p != player_id);
+
+                for other_player in &lobby.players {
+                    let conn = &self.connections[other_player];
+                    messages.push((conn.clone(), ServerMessage::PlayerDisconnected(player_id)));
+                }
+            }
+            Some(TableState::Game(game)) => {
+                let game_over = game.fold_disconnected(player_id);
+
+                // Notify the D/C
+                for other_player in &game.get_player_ids() {
+                    if !self.connections.contains_key(other_player) {
+                        // Don't send message to DC'd players
+                        continue;
+                    }
+
+                    let conn = &self.connections[other_player];
+                    messages.push((
+                        conn.clone(),
+                        ServerMessage::PlayerDisconnectedAndFolded(player_id),
+                    ));
+                }
+
+                // Send notifications about the updated table status
+                if game_over {
+                    // Hand finished: Notify showdown results to entire table
+                    messages.extend(self.end_game(table_id));
+                } else {
+                    // Notify entire table (and next player)
+                    messages.extend(self.notify_table(table_id));
+                }
+            }
+        };
+
+        messages
     }
 
     pub fn end_game(&mut self, table: TableId) -> Vec<(Connection, ServerMessage)> {
@@ -223,6 +294,11 @@ impl ServerState {
         let showdown_result = game.get_showdown_results();
 
         for player_id in players {
+            // Skip DC'd players
+            if !self.connections.contains_key(&player_id) {
+                continue;
+            }
+
             let conn = &self.connections[&player_id];
             //net::push(conn, &ServerMessage::GameOver(showdown_result.clone())).await?;
             output.push((
@@ -233,7 +309,11 @@ impl ServerState {
 
         // Reset table to lobby, keeping all players and settings
         *curr_table = TableState::Lobby(Lobby {
-            players: game.get_player_ids(),
+            players: game
+                .get_player_ids()
+                .into_iter()
+                .filter(|x| self.connections.contains_key(x))
+                .collect(),
             table_max_bet: game.table_max_bet,
             big_blind: game.big_blind,
             small_blind: game.small_blind,
@@ -326,14 +406,28 @@ async fn main() -> Result<(), anyhow::Error> {
                         }
                     }
                     ClientMessage::JoinTable(table_id) => {
-                        let mut state = state.lock().await;
-                        match state.lookup_player(&connection) {
-                            Some(player_id) => match state.join_table(player_id, table_id) {
-                                Ok(()) => ServerMessage::TableJoinSuccess(table_id),
-                                Err(err) => ServerMessage::TableJoinFailed(err),
-                            },
-                            None => ServerMessage::TableJoinFailed(TableError::PlayerNotFound),
+                        let (result, messages_to_send) = {
+                            let mut state = state.lock().await;
+                            match state.lookup_player(&connection) {
+                                Some(player_id) => match state.join_table(player_id, table_id) {
+                                    Ok(messages) => {
+                                        (ServerMessage::TableJoinSuccess(table_id), messages)
+                                    }
+                                    Err(err) => (ServerMessage::TableJoinFailed(err), vec![]),
+                                },
+                                None => (
+                                    ServerMessage::TableJoinFailed(TableError::PlayerNotFound),
+                                    vec![],
+                                ),
+                            }
+                        };
+
+                        // Network I/O after dropping mutex guard
+                        for (conn, message) in messages_to_send {
+                            let _ = net::push(&conn, &message).await; // updates fail silently
                         }
+
+                        result
                     }
                     ClientMessage::ConfigureTable(table_max_bet, big_blind, small_blind) => {
                         let mut state = state.lock().await;
@@ -422,6 +516,15 @@ async fn main() -> Result<(), anyhow::Error> {
                     break;
                 }
             }
+
+            let messages_to_send = {
+                let mut state = state.lock().await;
+                state.handle_disconnect(&connection)
+            };
+            for (conn, message) in messages_to_send {
+                let _ = net::push(&conn, &message).await; // updates fail silently
+            }
+
             info!(%remote, "Connection closed");
         });
     }

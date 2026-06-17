@@ -380,7 +380,7 @@ pub struct PokerGameView {
     player_to_action_idx: usize,
 }
 
-#[derive(Clone, Copy, Serialize, Deserialize)]
+#[derive(Clone, Copy, Debug, Serialize, Deserialize)]
 pub enum RuleError {
     NotYourTurn,
     CheckOnBet,
@@ -759,6 +759,32 @@ impl PokerGame {
         let showdown_finished = self.advance_round();
 
         Ok(showdown_finished)
+    }
+
+    pub fn fold_disconnected(&mut self, player_id: PlayerId) -> bool {
+        // Returns a bool signalling whether the game is over
+        if player_id == self.player_data[self.player_to_action_idx].id {
+            // If it's the current player, we process it as if they folded themselves to handle next player update.
+            // Fold is always legal for the current player, so it is safe to call unwrap() here.
+            return self.action(player_id, Action::Fold).unwrap();
+        }
+
+        let player_idx = self.player_ids_to_idx_map[&player_id];
+        let player = &mut self.player_data[player_idx];
+
+        // Don't fold a DC'd player which has already folded, or is all-in.
+        if !player.folded && !player.allin {
+            player.folded = true;
+            self.fold_counter += 1;
+
+            // Check if there's only one player left
+            if self.fold_counter == self.player_data.len() as u64 - 1 {
+                let showdown_finished = self.advance_round();
+                return showdown_finished;
+            }
+        }
+
+        false
     }
 
     pub fn get_player_ids(&self) -> Vec<PlayerId> {
