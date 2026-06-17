@@ -66,8 +66,7 @@ async fn main() -> Result<(), anyhow::Error> {
         };
 
         let response = net::request(&connection, &msg).await?;
-        // ServerMessage has no Debug/Display, so reuse the wire encoding to show it.
-        println!("<- {}", protocol::encode(&response).unwrap());
+        println!("<- {:?}", response);
     }
 
     Ok(())
@@ -114,7 +113,7 @@ fn print_notification(msg: &ServerMessage) {
         ServerMessage::GameOver(result) => println!("\n<- game over:\n{result}"),
         // Pushes are only ever state/turn/game-over notifications, but fall back
         // to the wire form for anything unexpected.
-        other => println!("\n<- {}", protocol::encode(other).unwrap()),
+        other => println!("\n<- {:?}", other),
     }
 
     print!("> ");
