@@ -17,3 +17,9 @@ tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 
 [features]
 dev = ["net/dev"]
+
+[profile.release]
+lto = "fat"
+strip = true
+codegen-units = 1
+panic = "abort"
