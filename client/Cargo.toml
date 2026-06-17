@@ -11,9 +11,3 @@ net = { path = "../net" }
 
 anyhow = { workspace = true }
 tokio = { workspace = true, features = ["macros", "rt-multi-thread", "net"] }
-
-[profile.release]
-lto = "fat"
-strip = true
-codegen-units = 1
-panic = "abort"
