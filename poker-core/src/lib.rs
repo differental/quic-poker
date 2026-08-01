@@ -317,6 +317,16 @@ fn evaluate_holdem_hand(cards: &[Card]) -> PokerHand {
     best_hand
 }
 
+pub const MIN_PLAYERS: usize = 3;
+pub const MAX_PLAYERS: usize = 10;
+
+/// Upper bound on a starting stack. Chosen so a whole pot (at most
+/// `MAX_PLAYERS * MAX_STACK`) fits in both `u64` and `i64`, which makes the pot
+/// sums and the `as i64` casts in settlement lossless and the zero-sum PnL
+/// invariant exact.
+pub const MAX_STACK: u64 = 1 << 40;
+const _: () = assert!(MAX_STACK * MAX_PLAYERS as u64 <= i64::MAX as u64);
+
 #[derive(PartialEq, Eq, Clone, Copy, Debug, Hash, Serialize, Deserialize)]
 pub struct PlayerId(pub u32);
 
@@ -332,9 +342,25 @@ pub enum Action {
 struct PlayerData {
     id: PlayerId,
     hole_cards: Vec<Card>,
+    /// Chips still behind, available to commit. `allin` means this is zero.
+    stack: u64,
+    /// Chips committed to the pot so far this hand, cumulative across streets.
     bet: u64,
     folded: bool,
     allin: bool,
+}
+
+/// Moves up to `amount` from the stack into the bet, flagging all-in when the
+/// stack empties. Returns what was actually committed, which is less than
+/// `amount` when the stack is too short to cover it.
+fn commit(player: &mut PlayerData, amount: u64) -> u64 {
+    let paid = amount.min(player.stack);
+    player.stack -= paid;
+    player.bet += paid;
+    if player.stack == 0 {
+        player.allin = true;
+    }
+    paid
 }
 
 #[derive(Clone, Copy, Debug, Serialize, Deserialize, PartialEq, Eq)]
@@ -352,7 +378,6 @@ pub struct PokerGame {
     current_bet: u64,
     community_cards: Vec<Card>,
     player_data: Vec<PlayerData>,
-    pub table_max_bet: u64,
     pub big_blind: u64,
     pub small_blind: u64,
     player_to_action_idx: usize,
@@ -364,6 +389,7 @@ pub struct PokerGame {
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct PlayerDataView {
     id: PlayerId,
+    stack: u64,
     bet: u64,
     folded: bool,
     allin: bool,
@@ -374,6 +400,7 @@ pub struct PokerGameView {
     current_round: PokerRound,
     current_bet: u64,
     player_current_bet: u64,
+    player_current_stack: u64,
     hole_cards: Vec<Card>,
     drawn_community_cards: Vec<Card>,
     player_view: Vec<PlayerDataView>,
@@ -386,7 +413,16 @@ pub enum RuleError {
     CheckOnBet,
     CallOnNoBet,
     BelowMinRaise,
-    ExceedTableMax,
+    InsufficientChips,
+}
+
+/// One layer of the pot. With no all-ins there is a single layer holding
+/// everything; each player who is all-in for less than the final bet splits off
+/// another layer that only the players who matched it can win.
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct Pot {
+    pub amount: u64,
+    pub winners: Vec<PlayerId>,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -395,6 +431,32 @@ pub struct PokerGameResult {
     total_pot: u64,
     community_cards: Vec<Card>,
     player_hands: Vec<(PlayerId, Vec<Card>, bool, PokerHand)>,
+    /// Pot layers, main pot first.
+    pots: Vec<Pot>,
+    /// Net chips won or lost this hand, in seat order (index i is seat i).
+    /// Always sums to exactly zero.
+    player_pnl: Vec<(PlayerId, i64)>,
+    /// What each seat is paid out of the pots, in seat order. Applied to stacks
+    /// by [`PokerGame::settle`].
+    payouts: Vec<u64>,
+}
+
+impl PokerGameResult {
+    pub fn player_pnl(&self) -> &[(PlayerId, i64)] {
+        &self.player_pnl
+    }
+
+    pub fn pots(&self) -> &[Pot] {
+        &self.pots
+    }
+
+    pub fn winners(&self) -> &[PlayerId] {
+        &self.winners
+    }
+
+    pub fn total_pot(&self) -> u64 {
+        self.total_pot
+    }
 }
 
 impl fmt::Display for PokerRound {
@@ -414,8 +476,11 @@ impl fmt::Display for PokerGameView {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         writeln!(
             f,
-            "round: {} | table bet: {} | your bet: {}",
-            self.current_round, self.current_bet, self.player_current_bet
+            "round: {} | table bet: {} | your bet: {} | your stack: {}",
+            self.current_round,
+            self.current_bet,
+            self.player_current_bet,
+            self.player_current_stack
         )?;
 
         write!(f, "board:")?;
@@ -458,8 +523,8 @@ impl fmt::Display for PokerGameView {
 
             writeln!(
                 f,
-                "{} player {}: bet {}{}{}",
-                blind, player.id.0, player.bet, status, to_act
+                "{} player {}: stack {}, bet {}{}{}",
+                blind, player.id.0, player.stack, player.bet, status, to_act
             )?;
         }
 
@@ -481,6 +546,23 @@ impl fmt::Display for PokerGameResult {
 
         writeln!(f, "pot: {}", self.total_pot)?;
 
+        // A single layer is the ordinary case and needs no breakdown; more than
+        // one means someone was all-in for less, so show who could win what.
+        if self.pots.len() > 1 {
+            for (i, pot) in self.pots.iter().enumerate() {
+                let label = if i == 0 {
+                    "  main pot".to_string()
+                } else {
+                    format!("  side pot {i}")
+                };
+                write!(f, "{label}: {} to", pot.amount)?;
+                for id in &pot.winners {
+                    write!(f, " player {}", id.0)?;
+                }
+                writeln!(f)?;
+            }
+        }
+
         let label = if self.winners.len() > 1 {
             "winners:"
         } else {
@@ -497,11 +579,19 @@ impl fmt::Display for PokerGameResult {
         for (id, hole_cards, folded, hand) in &self.player_hands {
             let marker = if self.winners.contains(id) { " *" } else { "" };
             let folded_marker = if *folded { " (folded)" } else { "" };
+            // player_pnl is in seat order while player_hands is in rank order,
+            // so look up rather than zip. At most 10 seats, so the scan is free.
+            let pnl = self
+                .player_pnl
+                .iter()
+                .find(|(p, _)| p == id)
+                .map(|(_, v)| *v)
+                .unwrap_or(0);
             write!(f, "  player {}:", id.0)?;
             for card in hole_cards {
                 write!(f, " {card}")?;
             }
-            writeln!(f, " - {hand}{folded_marker}{marker}")?;
+            writeln!(f, " - {hand}{folded_marker}{marker} ({pnl:+})")?;
         }
 
         Ok(())
@@ -509,10 +599,13 @@ impl fmt::Display for PokerGameResult {
 }
 
 impl PokerGame {
-    pub fn new(players: &[PlayerId], small_blind: u64, big_blind: u64, table_max_bet: u64) -> Self {
+    /// `players` is `(id, starting_stack)` in seat order: seat 0 is the button,
+    /// 1 the small blind, 2 the big blind.
+    pub fn new(players: &[(PlayerId, u64)], small_blind: u64, big_blind: u64) -> Self {
         // Start new poker game
-        assert!(players.len() >= 3); // min 3 players per game for now
-        assert!(players.len() <= 10); // max 10 players per game for now
+        assert!(players.len() >= MIN_PLAYERS);
+        assert!(players.len() <= MAX_PLAYERS);
+        assert!(players.iter().all(|(_, stack)| *stack <= MAX_STACK));
 
         let mut rng = rand::rng();
         let mut deck = Vec::from(*FULL_DECK);
@@ -521,10 +614,11 @@ impl PokerGame {
         let mut player_data = Vec::<PlayerData>::with_capacity(players.len());
         let mut player_ids_to_idx_map = HashMap::new();
 
-        for (i, player) in players.iter().enumerate() {
+        for (i, (player, stack)) in players.iter().enumerate() {
             player_data.push(PlayerData {
                 id: *player,
                 hole_cards: vec![deck.pop().unwrap(), deck.pop().unwrap()],
+                stack: *stack,
                 bet: 0,
                 folded: false,
                 allin: false,
@@ -532,8 +626,10 @@ impl PokerGame {
             player_ids_to_idx_map.insert(*player, i);
         }
 
-        player_data[1].bet = small_blind;
-        player_data[2].bet = big_blind;
+        // A stack shorter than its blind posts all-in for less rather than going
+        // negative, which is exactly the situation side pots exist to settle.
+        commit(&mut player_data[1], small_blind);
+        commit(&mut player_data[2], big_blind);
 
         let community_cards = vec![
             deck.pop().unwrap(),
@@ -551,7 +647,6 @@ impl PokerGame {
             current_round: PokerRound::PreFlop,
             current_bet: big_blind,
             community_cards,
-            table_max_bet,
             big_blind,
             small_blind,
             player_data,
@@ -562,41 +657,151 @@ impl PokerGame {
         }
     }
 
+    /// Works out who wins what, splitting the pot into side pots when players
+    /// are all-in for different amounts. Pure — call [`PokerGame::settle`] to
+    /// actually move the chips into stacks.
     pub fn get_showdown_results(&self) -> PokerGameResult {
         // Can only be called on a showdown-round game.
         assert_eq!(self.current_round, PokerRound::Showdown);
 
-        // Calculate player hands and sort (id, card, folded, hand) in decreasing order of hand
-        let player_hands: Vec<(PlayerId, Vec<Card>, bool, PokerHand)> = self
+        let num_players = self.player_data.len();
+
+        // Best hand per seat, indexed by seat.
+        let hands: Vec<PokerHand> = self
             .player_data
             .iter()
             .map(|x| {
-                (
-                    x.id,
-                    x.hole_cards.clone(),
-                    x.folded,
-                    self.community_cards
-                        .iter()
-                        .chain(&x.hole_cards)
-                        .cloned()
-                        .collect::<Vec<Card>>(),
-                )
+                let all_cards: Vec<Card> = self
+                    .community_cards
+                    .iter()
+                    .chain(&x.hole_cards)
+                    .cloned()
+                    .collect();
+                evaluate_holdem_hand(&all_cards)
             })
-            .map(|(id, hole_cards, folded, all_cards)| {
-                (id, hole_cards, folded, evaluate_holdem_hand(&all_cards))
-            })
+            .collect();
+
+        // The same hands sorted for display: live players first, then strongest
+        // first, so the recap reads as a ranking.
+        let player_hands: Vec<(PlayerId, Vec<Card>, bool, PokerHand)> = self
+            .player_data
+            .iter()
+            .zip(&hands)
+            .map(|(x, hand)| (x.id, x.hole_cards.clone(), x.folded, *hand))
             .sorted_by(|x, y| Ord::cmp(&x.2, &y.2).then(Ord::cmp(&x.3, &y.3).reverse()))
             .collect();
 
         let total_pot: u64 = self.player_data.iter().map(|x| x.bet).sum();
 
-        let mut winners = vec![player_hands[0].0];
+        // Slice the pot into one layer per distinct contribution level. A player
+        // all-in for less can only win up to what they matched, which is the
+        // layer at their own level and everything below it. Folded players'
+        // chips are in the pot too: forfeited, but still real money.
+        let mut levels: Vec<u64> = self
+            .player_data
+            .iter()
+            .map(|x| x.bet)
+            .filter(|bet| *bet > 0)
+            .collect();
+        levels.sort_unstable();
+        levels.dedup();
 
-        for i in 1..player_hands.len() {
-            if player_hands[i].3 == player_hands[0].3 && !player_hands[i].2 {
-                winners.push(player_hands[i].0);
-            } else {
-                break;
+        struct Layer {
+            amount: u64,
+            eligible: Vec<usize>,
+            contributions: Vec<u64>, // by seat
+        }
+
+        let mut layers: Vec<Layer> = Vec::with_capacity(levels.len());
+        let mut prev_level = 0u64;
+        for level in levels {
+            let contributions: Vec<u64> = self
+                .player_data
+                .iter()
+                .map(|x| x.bet.min(level) - x.bet.min(prev_level))
+                .collect();
+            let eligible: Vec<usize> = (0..num_players)
+                .filter(|&seat| {
+                    !self.player_data[seat].folded && self.player_data[seat].bet >= level
+                })
+                .collect();
+            layers.push(Layer {
+                amount: contributions.iter().sum(),
+                eligible,
+                contributions,
+            });
+            prev_level = level;
+        }
+
+        // Eligibility only shrinks as the level rises, so a layer with no live
+        // claimant is necessarily at the top with only other orphans above it.
+        // Fold those chips down into the highest layer someone can still win.
+        while layers.len() > 1 && layers.last().unwrap().eligible.is_empty() {
+            let orphan = layers.pop().unwrap();
+            layers.last_mut().unwrap().amount += orphan.amount;
+        }
+
+        let mut payouts = vec![0u64; num_players];
+        let mut pots: Vec<Pot> = Vec::with_capacity(layers.len());
+
+        for layer in &layers {
+            if layer.eligible.is_empty() {
+                // Nobody live ever matched even this level. Hand the chips back
+                // to whoever put them in rather than vanishing them.
+                for (seat, amount) in layer.contributions.iter().enumerate() {
+                    payouts[seat] += amount;
+                }
+                continue;
+            }
+
+            let best = layer
+                .eligible
+                .iter()
+                .map(|&seat| hands[seat])
+                .max()
+                .unwrap();
+            let mut winner_seats: Vec<usize> = layer
+                .eligible
+                .iter()
+                .copied()
+                .filter(|&seat| hands[seat] == best)
+                .collect();
+
+            // Odd chips that don't divide evenly go one at a time to the seats
+            // nearest the button's left: seat 1 (small blind) first, the button
+            // at seat 0 last. `eligible` is built in seat order, so this only
+            // has to rotate seat 0 to the back.
+            winner_seats.sort_by_key(|&seat| (seat + num_players - 1) % num_players);
+
+            let share = layer.amount / winner_seats.len() as u64;
+            let remainder = layer.amount % winner_seats.len() as u64;
+            for (i, &seat) in winner_seats.iter().enumerate() {
+                payouts[seat] += share + if (i as u64) < remainder { 1 } else { 0 };
+            }
+
+            pots.push(Pot {
+                amount: layer.amount,
+                winners: winner_seats
+                    .iter()
+                    .map(|&seat| self.player_data[seat].id)
+                    .collect(),
+            });
+        }
+
+        let player_pnl: Vec<(PlayerId, i64)> = self
+            .player_data
+            .iter()
+            .enumerate()
+            .map(|(seat, x)| (x.id, payouts[seat] as i64 - x.bet as i64))
+            .collect();
+
+        // Everyone who took a share of any layer, main pot first, deduped.
+        let mut winners: Vec<PlayerId> = Vec::new();
+        for pot in &pots {
+            for id in &pot.winners {
+                if !winners.contains(id) {
+                    winners.push(*id);
+                }
             }
         }
 
@@ -605,7 +810,25 @@ impl PokerGame {
             total_pot,
             community_cards: self.community_cards.clone(),
             player_hands,
+            pots,
+            player_pnl,
+            payouts,
         }
+    }
+
+    /// Pays a showdown result into the players' stacks. Call exactly once per
+    /// hand, with the result from [`PokerGame::get_showdown_results`].
+    pub fn settle(&mut self, result: &PokerGameResult) {
+        assert_eq!(self.current_round, PokerRound::Showdown);
+        assert_eq!(result.payouts.len(), self.player_data.len());
+        for (seat, player) in self.player_data.iter_mut().enumerate() {
+            player.stack += result.payouts[seat];
+        }
+    }
+
+    /// Final stacks in seat order, for carrying chips into the next hand.
+    pub fn stacks(&self) -> Vec<(PlayerId, u64)> {
+        self.player_data.iter().map(|x| (x.id, x.stack)).collect()
     }
 
     fn advance_round(&mut self) -> bool {
@@ -695,10 +918,6 @@ impl PokerGame {
                 if curr_player.bet != self.current_bet {
                     return Err(RuleError::CheckOnBet);
                 }
-                // Check could signal all-in if blinds are same as max bet
-                if self.current_bet == self.table_max_bet {
-                    curr_player.allin = true;
-                }
                 // Check: Do nothing
             }
             Action::Fold => {
@@ -717,13 +936,10 @@ impl PokerGame {
                 if curr_player.bet == self.current_bet {
                     return Err(RuleError::CallOnNoBet);
                 }
-                // Call: Set new bet
-                curr_player.bet = self.current_bet;
-
-                // If calling a max bet, it's also an all-in
-                if self.current_bet == self.table_max_bet {
-                    curr_player.allin = true;
-                }
+                // A stack too short to cover the call goes all-in for less,
+                // which is legal and is what creates a side pot.
+                let to_call = self.current_bet - curr_player.bet;
+                commit(curr_player, to_call);
             }
             Action::Raise { to: new_bet } => {
                 // Raise only legal if new_bet larger than current bet
@@ -731,21 +947,17 @@ impl PokerGame {
                     return Err(RuleError::BelowMinRaise);
                 }
 
-                // Illegal to raise more than table max
-                if new_bet > self.table_max_bet {
-                    return Err(RuleError::ExceedTableMax);
+                // Can't put in more than is behind. Shoving the exact stack is
+                // fine; anything past it is not.
+                let to_put_in = new_bet - curr_player.bet;
+                if to_put_in > curr_player.stack {
+                    return Err(RuleError::InsufficientChips);
                 }
 
-                // Raise: Set user bet as well as table current bet
+                commit(curr_player, to_put_in);
                 self.current_bet = new_bet;
-                curr_player.bet = new_bet;
                 // Update last raise to the current player
                 self.last_raise_player_idx = self.player_to_action_idx;
-
-                // If user bet is same as table max bet, it's effectively an "all-in"
-                if new_bet == self.table_max_bet {
-                    curr_player.allin = true;
-                }
             }
         }
 
@@ -826,6 +1038,7 @@ impl PokerGame {
             current_round: self.current_round,
             current_bet: self.current_bet,
             player_current_bet: self.player_data[player_idx].bet,
+            player_current_stack: self.player_data[player_idx].stack,
             hole_cards: self.player_data[player_idx].hole_cards.clone(),
             drawn_community_cards,
             player_view: self
@@ -833,6 +1046,7 @@ impl PokerGame {
                 .iter()
                 .map(|x| PlayerDataView {
                     id: x.id,
+                    stack: x.stack,
                     bet: x.bet,
                     folded: x.folded,
                     allin: x.allin,
@@ -859,6 +1073,7 @@ mod tests {
             .map(|i| PlayerData {
                 id: PlayerId(i as u32),
                 hole_cards: vec![],
+                stack: 10_000,
                 bet: 0,
                 folded: false,
                 allin: false,
@@ -878,12 +1093,351 @@ mod tests {
             player_data,
             big_blind: 100,
             small_blind: 50,
-            table_max_bet: 10_000,
             player_to_action_idx: 0,
             last_raise_player_idx: 0,
             player_ids_to_idx_map,
             fold_counter: 0,
         }
+    }
+
+    /// Seats a finished hand on `full_board()` with explicit bets, hole cards
+    /// and folds. Stacks start at zero so that after `settle` a seat's stack is
+    /// exactly what it was paid.
+    fn showdown_with(bets: &[u64], hands: &[Vec<Card>], folded: &[usize]) -> PokerGame {
+        let mut game = game_with_players(bets.len());
+        game.current_round = PokerRound::Showdown;
+        game.community_cards = full_board();
+        for (seat, player) in game.player_data.iter_mut().enumerate() {
+            player.bet = bets[seat];
+            player.stack = 0;
+            player.hole_cards = hands[seat].clone();
+        }
+        for &seat in folded {
+            game.player_data[seat].folded = true;
+        }
+        game
+    }
+
+    // Against full_board() (2♠ 7♥ T♦ J♣ A♠) these rank aces > kings > queens >
+    // rags. Cards compare by rank only, so the two king hands tie exactly.
+    fn aces() -> Vec<Card> {
+        vec![
+            card(Rank::Ace, Suit::Hearts),
+            card(Rank::Ace, Suit::Diamonds),
+        ]
+    }
+    fn kings_a() -> Vec<Card> {
+        vec![
+            card(Rank::King, Suit::Spades),
+            card(Rank::King, Suit::Hearts),
+        ]
+    }
+    fn kings_b() -> Vec<Card> {
+        vec![
+            card(Rank::King, Suit::Diamonds),
+            card(Rank::King, Suit::Clubs),
+        ]
+    }
+    fn queens() -> Vec<Card> {
+        vec![
+            card(Rank::Queen, Suit::Spades),
+            card(Rank::Queen, Suit::Hearts),
+        ]
+    }
+    // Three hands that all play the board identically, for three-way ties.
+    fn rags(n: usize) -> Vec<Card> {
+        let suits = [Suit::Hearts, Suit::Diamonds, Suit::Clubs];
+        vec![card(Rank::Three, suits[n]), card(Rank::Five, suits[n])]
+    }
+
+    fn pnl(result: &PokerGameResult) -> Vec<i64> {
+        result.player_pnl().iter().map(|(_, v)| *v).collect()
+    }
+
+    // A lone winner takes the pot and is up by everyone else's contributions.
+    #[test]
+    fn pnl_single_winner_takes_pot_minus_own_bet() {
+        let game = showdown_with(&[100, 100, 100], &[aces(), kings_a(), queens()], &[]);
+        let result = game.get_showdown_results();
+        assert_eq!(pnl(&result), vec![200, -100, -100]);
+        assert_eq!(result.winners(), &[PlayerId(0)]);
+    }
+
+    // Tied winners split the pot evenly when it divides.
+    #[test]
+    fn pnl_splits_evenly_between_tied_winners() {
+        let game = showdown_with(
+            &[100, 100, 100, 100],
+            &[queens(), kings_a(), kings_b(), queens()],
+            &[],
+        );
+        let result = game.get_showdown_results();
+        assert_eq!(pnl(&result), vec![-100, 100, 100, -100]);
+    }
+
+    // An odd chip goes to the small blind, the first seat left of the button.
+    // The folded seat's extra chip is orphaned above every live bet, so it also
+    // covers the orphan layer merging down instead of vanishing.
+    #[test]
+    fn pnl_odd_chip_goes_to_seat_left_of_button() {
+        let game = showdown_with(&[100, 100, 101], &[kings_a(), kings_b(), aces()], &[2]);
+        let result = game.get_showdown_results();
+        assert_eq!(result.total_pot(), 301);
+        assert_eq!(pnl(&result), vec![50, 51, -101]);
+    }
+
+    // With two odd chips the button is served last, not first. This is the test
+    // that fails if the winners are left in plain seat order.
+    #[test]
+    fn pnl_odd_chips_reach_the_button_last() {
+        let game = showdown_with(
+            &[100, 100, 100, 2],
+            &[rags(0), rags(1), rags(2), aces()],
+            &[3],
+        );
+        let result = game.get_showdown_results();
+        assert_eq!(result.total_pot(), 302);
+        assert_eq!(pnl(&result), vec![0, 1, 1, -2]);
+    }
+
+    // A folded player forfeits exactly what they put in.
+    #[test]
+    fn pnl_folded_player_loses_their_contribution() {
+        let game = showdown_with(&[100, 100, 50], &[aces(), kings_a(), queens()], &[2]);
+        let result = game.get_showdown_results();
+        assert_eq!(pnl(&result), vec![150, -100, -50]);
+    }
+
+    // Holding the best hand is worth nothing once you have folded.
+    #[test]
+    fn pnl_folded_player_never_wins_a_tie() {
+        let game = showdown_with(&[100, 100, 100], &[kings_a(), kings_b(), aces()], &[2]);
+        let result = game.get_showdown_results();
+        assert!(!result.winners().contains(&PlayerId(2)));
+        assert_eq!(pnl(&result)[2], -100);
+    }
+
+    // A short all-in wins the main pot only; the side pot goes to the best of
+    // the players who kept betting.
+    #[test]
+    fn side_pot_short_allin_wins_only_main_pot() {
+        let game = showdown_with(&[100, 500, 500], &[aces(), kings_a(), queens()], &[]);
+        let result = game.get_showdown_results();
+        assert_eq!(result.pots().len(), 2);
+        assert_eq!(result.pots()[0].amount, 300);
+        assert_eq!(result.pots()[0].winners, vec![PlayerId(0)]);
+        assert_eq!(result.pots()[1].amount, 800);
+        assert_eq!(result.pots()[1].winners, vec![PlayerId(1)]);
+        assert_eq!(pnl(&result), vec![200, 300, -500]);
+    }
+
+    // Three all-ins at three different levels build three layers.
+    #[test]
+    fn side_pot_three_way_allin_builds_three_layers() {
+        let game = showdown_with(&[100, 300, 500], &[queens(), kings_a(), aces()], &[]);
+        let result = game.get_showdown_results();
+        assert_eq!(result.pots().len(), 3);
+        assert_eq!(
+            result.pots().iter().map(|p| p.amount).collect::<Vec<_>>(),
+            vec![300, 400, 200]
+        );
+        // Seat 2 has the best hand and matched every level, so it wins them all.
+        assert_eq!(pnl(&result), vec![-100, -300, 400]);
+    }
+
+    // Chips nobody live can claim are returned rather than lost: an uncalled
+    // shove comes back to the player who made it.
+    #[test]
+    fn uncalled_portion_of_a_bet_is_returned() {
+        let game = showdown_with(&[500, 100, 100], &[aces(), kings_a(), queens()], &[]);
+        let result = game.get_showdown_results();
+        // Seat 0 wins the 300 everyone matched and gets its extra 400 back.
+        assert_eq!(pnl(&result), vec![200, -100, -100]);
+    }
+
+    // Every fixture settles to exactly zero: chips are conserved.
+    #[test]
+    fn pnl_sums_to_zero() {
+        let fixtures = vec![
+            showdown_with(&[100, 100, 100], &[aces(), kings_a(), queens()], &[]),
+            showdown_with(&[100, 100, 101], &[kings_a(), kings_b(), aces()], &[2]),
+            showdown_with(
+                &[100, 100, 100, 2],
+                &[rags(0), rags(1), rags(2), aces()],
+                &[3],
+            ),
+            showdown_with(&[100, 500, 500], &[aces(), kings_a(), queens()], &[]),
+            showdown_with(&[100, 300, 500], &[queens(), kings_a(), aces()], &[]),
+            showdown_with(&[500, 100, 100], &[aces(), kings_a(), queens()], &[]),
+            showdown_with(&[0, 0, 0], &[aces(), kings_a(), queens()], &[]),
+        ];
+        for game in &fixtures {
+            let result = game.get_showdown_results();
+            assert_eq!(pnl(&result).iter().sum::<i64>(), 0);
+        }
+    }
+
+    // The pot layers always add back up to the total pot.
+    #[test]
+    fn pots_sum_to_total_pot() {
+        let game = showdown_with(&[100, 300, 500], &[queens(), kings_a(), aces()], &[]);
+        let result = game.get_showdown_results();
+        assert_eq!(
+            result.pots().iter().map(|p| p.amount).sum::<u64>(),
+            result.total_pot()
+        );
+    }
+
+    // Nobody who wins a share ends the hand down on it.
+    #[test]
+    fn pnl_winner_is_never_negative() {
+        for game in [
+            showdown_with(&[100, 500, 500], &[aces(), kings_a(), queens()], &[]),
+            showdown_with(&[100, 300, 500], &[queens(), kings_a(), aces()], &[]),
+            showdown_with(&[100, 100, 101], &[kings_a(), kings_b(), aces()], &[2]),
+        ] {
+            let result = game.get_showdown_results();
+            for (id, delta) in result.player_pnl() {
+                if result.winners().contains(id) {
+                    assert!(*delta >= 0, "winner {id:?} finished at {delta}");
+                }
+            }
+        }
+    }
+
+    // player_pnl is in seat order so it lines up with player_data positionally.
+    #[test]
+    fn pnl_covers_every_seat_in_seat_order() {
+        let game = showdown_with(&[100, 100, 100], &[aces(), kings_a(), queens()], &[]);
+        let result = game.get_showdown_results();
+        let ids: Vec<PlayerId> = result.player_pnl().iter().map(|(id, _)| *id).collect();
+        assert_eq!(ids, vec![PlayerId(0), PlayerId(1), PlayerId(2)]);
+    }
+
+    // settle moves the winnings into the stacks, once.
+    #[test]
+    fn settle_pays_winnings_into_stacks() {
+        let mut game = showdown_with(&[100, 500, 500], &[aces(), kings_a(), queens()], &[]);
+        let result = game.get_showdown_results();
+        game.settle(&result);
+        assert_eq!(
+            game.stacks(),
+            vec![(PlayerId(0), 300), (PlayerId(1), 800), (PlayerId(2), 0)]
+        );
+    }
+
+    // A stack too short to cover its blind posts what it has and is all-in.
+    #[test]
+    fn stack_shorter_than_blind_posts_allin_for_less() {
+        let game = PokerGame::new(
+            &[(PlayerId(0), 1_000), (PlayerId(1), 3), (PlayerId(2), 1_000)],
+            5,
+            10,
+        );
+        assert_eq!(game.player_data[1].bet, 3);
+        assert_eq!(game.player_data[1].stack, 0);
+        assert!(game.player_data[1].allin);
+        // The big blind had enough and is not all-in.
+        assert_eq!(game.player_data[2].bet, 10);
+        assert!(!game.player_data[2].allin);
+    }
+
+    // Calling with too few chips commits the whole stack and goes all-in.
+    #[test]
+    fn short_call_commits_whole_stack_and_flags_allin() {
+        let mut game = game_with_players(3);
+        game.player_data[0].stack = 40;
+        game.current_bet = 100;
+        assert!(game.action(PlayerId(0), Action::Call).is_ok());
+        assert_eq!(game.player_data[0].bet, 40);
+        assert_eq!(game.player_data[0].stack, 0);
+        assert!(game.player_data[0].allin);
+    }
+
+    // Chips are never created or destroyed by an action: stack + bet holds.
+    #[test]
+    fn stack_plus_bet_is_conserved_across_actions() {
+        let mut game = game_with_players(3);
+        let before: Vec<u64> = game.player_data.iter().map(|p| p.stack + p.bet).collect();
+
+        let _ = game.action(PlayerId(0), Action::Raise { to: 500 });
+        let _ = game.action(PlayerId(1), Action::Call);
+        let _ = game.action(PlayerId(2), Action::Call);
+
+        let after: Vec<u64> = game.player_data.iter().map(|p| p.stack + p.bet).collect();
+        assert_eq!(before, after);
+    }
+
+    // A whole hand driven through `action`: a short stack is priced in for less
+    // than the others, so settlement has to split into a main and a side pot.
+    // Hole cards are shuffled, so this asserts the shape rather than a winner.
+    #[test]
+    fn full_hand_with_short_allin_produces_a_side_pot() {
+        let mut game = PokerGame::new(
+            &[
+                (PlayerId(0), 1_000),
+                (PlayerId(1), 1_000),
+                (PlayerId(2), 120),
+            ],
+            5,
+            10,
+        );
+
+        // Seat 0 opens, seat 1 calls, and seat 2 can only cover 120 of it.
+        assert!(!game.action(PlayerId(0), Action::Raise { to: 500 }).unwrap());
+        assert!(!game.action(PlayerId(1), Action::Call).unwrap());
+        assert!(!game.action(PlayerId(2), Action::Call).unwrap());
+
+        assert_eq!(game.player_data[2].bet, 120);
+        assert_eq!(game.player_data[2].stack, 0);
+        assert!(game.player_data[2].allin);
+
+        // Everyone left checks it down to showdown.
+        let mut over = false;
+        for _ in 0..20 {
+            if over {
+                break;
+            }
+            let id = game.player_data[game.player_to_action_idx].id;
+            over = game.action(id, Action::Check).unwrap();
+        }
+        assert!(over, "hand should have reached showdown");
+
+        let result = game.get_showdown_results();
+        assert_eq!(result.total_pot(), 1_120);
+        // Main pot is 120 from each; the side pot is what the other two put in
+        // beyond what the short stack could match.
+        assert_eq!(result.pots().len(), 2);
+        assert_eq!(result.pots()[0].amount, 360);
+        assert_eq!(result.pots()[1].amount, 760);
+        // The short stack is never eligible for the side pot.
+        assert!(!result.pots()[1].winners.contains(&PlayerId(2)));
+
+        let deltas = pnl(&result);
+        assert_eq!(deltas.iter().sum::<i64>(), 0);
+        // Seat 2 can lose at most what it put in and win at most the main pot.
+        assert!((-120..=240).contains(&deltas[2]));
+
+        game.settle(&result);
+        assert_eq!(
+            game.stacks().iter().map(|(_, stack)| *stack).sum::<u64>(),
+            2_120
+        );
+    }
+
+    // A starting stack above the settlement ceiling is rejected outright.
+    #[test]
+    #[should_panic]
+    fn new_rejects_stack_above_max() {
+        PokerGame::new(
+            &[
+                (PlayerId(0), MAX_STACK + 1),
+                (PlayerId(1), 100),
+                (PlayerId(2), 100),
+            ],
+            5,
+            10,
+        );
     }
 
     // Hand categories rank from RoyalFlush (best) down to HighCard (worst).
@@ -1147,16 +1701,33 @@ mod tests {
         assert_eq!(game.player_data[1].bet, 100);
     }
 
-    // A raise above table_max_bet is rejected and leaves state untouched.
+    // A raise beyond what the player has behind is rejected, untouched state.
     #[test]
-    fn raise_above_table_max_is_rejected() {
+    fn raise_beyond_stack_is_rejected() {
         let mut game = game_with_players(3);
-        game.table_max_bet = 1_000;
+        game.player_data[0].stack = 1_000;
         game.current_bet = 100;
         let res = game.action(PlayerId(0), Action::Raise { to: 5_000 });
-        assert!(res.is_err());
+        assert!(matches!(res, Err(RuleError::InsufficientChips)));
         assert_eq!(game.current_bet, 100);
         assert_eq!(game.player_data[0].bet, 0);
+        assert_eq!(game.player_data[0].stack, 1_000);
+    }
+
+    // Shoving exactly the stack is legal and flags the player all-in.
+    #[test]
+    fn raise_of_exactly_the_stack_is_an_allin() {
+        let mut game = game_with_players(3);
+        game.player_data[0].stack = 1_000;
+        game.current_bet = 100;
+        assert!(
+            game.action(PlayerId(0), Action::Raise { to: 1_000 })
+                .is_ok()
+        );
+        assert_eq!(game.player_data[0].bet, 1_000);
+        assert_eq!(game.player_data[0].stack, 0);
+        assert!(game.player_data[0].allin);
+        assert_eq!(game.current_bet, 1_000);
     }
 
     // Cards compare by rank only; suit is intentionally ignored.
