@@ -66,7 +66,7 @@ async fn main() -> Result<(), anyhow::Error> {
         };
 
         let response = net::request(&connection, &msg).await?;
-        println!("<- {:?}", response);
+        println!("<- {}", render(&response));
     }
 
     Ok(())
@@ -102,19 +102,26 @@ async fn parse_server_addr() -> Result<(SocketAddr, String), anyhow::Error> {
     Ok((addr, host))
 }
 
+/// Renders a server message for display. Shared by the push handler and the
+/// request/response loop so a message looks the same however it arrived.
+fn render(msg: &ServerMessage) -> String {
+    match msg {
+        ServerMessage::StateUpdate(view) => format!("state update:\n{view}"),
+        ServerMessage::ItsYourTurn => {
+            "it's your turn! (fold | check | call | raise <to>)".to_string()
+        }
+        ServerMessage::GameOver(result) => format!("game over:\n{result}"),
+        ServerMessage::Standings(standings) => format!("{standings}"),
+        // Everything else has no dedicated rendering, so fall back to the wire
+        // form rather than hiding it.
+        other => format!("{other:?}"),
+    }
+}
+
 /// Displays a server-initiated notification (a state update or a turn alert),
 /// then restores the input prompt the user was typing at.
 fn print_notification(msg: &ServerMessage) {
-    match msg {
-        ServerMessage::StateUpdate(view) => println!("\n<- state update:\n{view}"),
-        ServerMessage::ItsYourTurn => {
-            println!("\n<- it's your turn! (fold | check | call | raise <to>)")
-        }
-        ServerMessage::GameOver(result) => println!("\n<- game over:\n{result}"),
-        // Pushes are only ever state/turn/game-over notifications, but fall back
-        // to the wire form for anything unexpected.
-        other => println!("\n<- {:?}", other),
-    }
+    println!("\n<- {}", render(msg));
 
     print!("> ");
     let _ = io::stdout().flush();
@@ -129,14 +136,15 @@ fn parse_command(line: &str) -> Result<Command, String> {
         "help" | "?" => return Ok(Command::Help),
         "quit" | "exit" | "q" => return Ok(Command::Quit),
 
-        "hello" => ClientMessage::Hello,
+        "hello" => ClientMessage::Hello(parse_arg(&mut parts, "name")?),
         "join" => ClientMessage::JoinTable(TableId(parse_arg(&mut parts, "table_id")?)),
         "configure" => ClientMessage::ConfigureTable(
-            parse_arg(&mut parts, "table_max_bet")?,
+            parse_arg(&mut parts, "starting_stack")?,
             parse_arg(&mut parts, "big_blind")?,
             parse_arg(&mut parts, "small_blind")?,
         ),
         "start" => ClientMessage::StartGame,
+        "standings" => ClientMessage::GetStandings,
 
         "fold" => ClientMessage::Action(Action::Fold),
         "check" => ClientMessage::Action(Action::Check),
@@ -168,12 +176,13 @@ fn print_help() {
     println!(
         "\
 Commands:
-  hello                                  send Hello (register with the server)
-  join <table_id>                        join a table
-  configure <max_bet> <big> <small>      configure current table
+  hello <name>                           sign in (your name keys your PnL)
+  join <table_id>                        join a table and buy in
+  configure <stack> <big> <small>        configure current table
   start                                  start the game
   fold | check | call                    take an action
   raise <to>                             raise to an amount
+  standings                              show cumulative PnL for your table
   help                                   show this help
   quit                                   exit"
     );
